@@ -3720,11 +3720,11 @@ html,body,#root{height:100%;overflow:hidden}
 .invite-input-row button{padding:10px 14px;border-radius:8px;border:none;font-size:.9rem;cursor:pointer;background:rgba(255,255,255,.15);color:#f4e4c1}
 
 /* 个人主页账号状态 */
-.profile-account-status{padding:16px 24px;margin-top:auto;position:relative;z-index:1;background:linear-gradient(180deg,transparent 0%,rgba(26,29,46,.9) 100%)}
+.profile-account-status{padding:20px 24px;position:relative;z-index:1;background:rgba(26,29,46,.95)}
 .profile-account-status .logged-in{display:flex;align-items:center;gap:8px;color:rgba(244,228,193,.6);font-size:.85rem}
 .profile-account-status .sync-indicator{width:6px;height:6px;border-radius:50%;background:#27ae60}
 .profile-account-status .sync-indicator[data-status="syncing"]{background:#f39c12;animation:pulse 1s infinite}
 .profile-account-status .sync-indicator[data-status="error"]{background:#e74c3c}
-.profile-account-status .login-btn{width:100%;padding:14px;background:linear-gradient(135deg,#8B7355,#6B5335);color:#f4e4c1;border:none;border-radius:10px;font-size:1rem;cursor:pointer}
+.profile-account-status .login-btn{width:100%;padding:14px;background:linear-gradient(135deg,#8B7355,#6B5335);color:#f4e4c1;border:none;border-radius:10px;font-size:1rem;cursor:pointer;display:block;text-align:center}
 .profile-account-status .login-btn:active{opacity:.8}
 `;
