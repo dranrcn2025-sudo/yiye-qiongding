@@ -1,0 +1,26 @@
+# 依赖
+node_modules
+
+# 构建产物
+dist
+
+# Android 打包目录
+android
+
+# iOS 打包目录（如果以后需要）
+ios
+
+# 本地环境文件
+.env
+.env.local
+
+# 编辑器
+.vscode
+.idea
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
