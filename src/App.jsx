@@ -1765,16 +1765,36 @@ export default function App() {
   const [viewingSharedUser, setViewingSharedUser] = useState(null); // 正在查看谁的书架
   const [sharedBookshelf, setSharedBookshelf] = useState(null); // 他人的书架数据
   const [showInviteInput, setShowInviteInput] = useState(false);
+  const lastUserId = useRef(null); // 追踪上一个用户ID
 
   // 初始化认证状态
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
+      lastUserId.current = session?.user?.id ?? null;
       setAuthLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+      const newUser = session?.user ?? null;
+      const newUserId = newUser?.id ?? null;
+      
+      // 如果用户变了（包括登出），清空本地数据
+      if (lastUserId.current !== newUserId) {
+        // 清空本地存储
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem('lastUpdated');
+        
+        if (!newUser) {
+          // 登出：重置为初始数据
+          setData(initialData);
+        }
+        // 登录：数据会在 loadCloudData 中加载
+        
+        lastUserId.current = newUserId;
+      }
+      
+      setUser(newUser);
     });
 
     return () => subscription.unsubscribe();
@@ -1805,16 +1825,16 @@ export default function App() {
       }
       
       if (cloudData?.data) {
-        const localUpdated = localStorage.getItem('lastUpdated');
-        const cloudUpdated = new Date(cloudData.updated_at).getTime();
-        
-        // 如果云端数据更新，使用云端数据
-        if (!localUpdated || cloudUpdated > parseInt(localUpdated)) {
-          setData(cloudData.data);
-          saveToStorage(cloudData.data);
-          localStorage.setItem('lastUpdated', cloudUpdated.toString());
-        }
+        // 直接使用云端数据，不比较时间戳
+        setData(cloudData.data);
+        saveToStorage(cloudData.data);
+        localStorage.setItem('lastUpdated', new Date(cloudData.updated_at).getTime().toString());
         setLastSyncTime(new Date(cloudData.updated_at));
+      } else {
+        // 云端没有数据，使用初始数据并上传
+        setData(initialData);
+        saveToStorage(initialData);
+        await saveToCloud(initialData);
       }
       setSyncStatus('success');
     } catch (err) {
@@ -3445,7 +3465,7 @@ html,body,#root{height:100%;overflow:hidden}
 .profile-menu-item span:first-child{font-size:1.3rem}
 .profile-menu-item span:nth-child(2){flex:1}
 .menu-arrow{color:rgba(244,228,193,.4);font-size:1.2rem}
-.profile-footer{text-align:center;padding:30px 20px;color:rgba(244,228,193,.4);font-size:.85rem}
+.profile-footer{text-align:center;padding:30px 20px;color:rgba(244,228,193,.4);font-size:.85rem;position:relative;z-index:1;background:rgba(26,29,46,.9)}
 .profile-footer p{margin:4px 0}
 
 /* ============ 正文模式样式 ============ */
@@ -3700,7 +3720,7 @@ html,body,#root{height:100%;overflow:hidden}
 .invite-input-row button{padding:10px 14px;border-radius:8px;border:none;font-size:.9rem;cursor:pointer;background:rgba(255,255,255,.15);color:#f4e4c1}
 
 /* 个人主页账号状态 */
-.profile-account-status{padding:16px 24px;margin-top:auto}
+.profile-account-status{padding:16px 24px;margin-top:auto;position:relative;z-index:1;background:linear-gradient(180deg,transparent 0%,rgba(26,29,46,.9) 100%)}
 .profile-account-status .logged-in{display:flex;align-items:center;gap:8px;color:rgba(244,228,193,.6);font-size:.85rem}
 .profile-account-status .sync-indicator{width:6px;height:6px;border-radius:50%;background:#27ae60}
 .profile-account-status .sync-indicator[data-status="syncing"]{background:#f39c12;animation:pulse 1s infinite}
