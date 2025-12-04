@@ -2332,7 +2332,10 @@ export default function App() {
     }, 280);
   };
   
-  const allTitlesMap = useMemo(() => collectAllLinkableTitles(data.books), [data.books]);
+  const allTitlesMap = useMemo(() => {
+    const booksSource = visitingBookshelf ? visitingBookshelf.books : data.books;
+    return collectAllLinkableTitles(booksSource);
+  }, [data.books, visitingBookshelf]);
   
   // 全局搜索函数
   const performSearch = useCallback((query) => {
@@ -2483,7 +2486,9 @@ export default function App() {
     const jumpRecord = { bookId: currentBook.id, entry: currentEntry, viewMode };
     setNavigationStack(p => [...p, jumpRecord]); 
     
-    const tb = data.books.find(b => b.id === tbid); 
+    // 访问模式下使用visitingBookshelf，否则使用data
+    const booksSource = visitingBookshelf ? visitingBookshelf.books : data.books;
+    const tb = booksSource.find(b => b.id === tbid); 
     if (tb) { 
       setSlideAnim('slide-in'); 
       setCurrentBook(tb); 
@@ -2499,7 +2504,7 @@ export default function App() {
       } 
       setTimeout(() => setSlideAnim(''), 250); 
     } 
-  }, [currentBook, currentEntry, viewMode, data.books, initMerged]);
+  }, [currentBook, currentEntry, viewMode, data.books, visitingBookshelf, initMerged]);
 
   // 修改标题并同步更新所有【】引用
   const handleTitleChange = (entryId, oldTitle, newTitle) => {
