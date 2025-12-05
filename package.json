@@ -15,10 +15,14 @@
     "@supabase/supabase-js": "^2.86.0",
     "canvas": "^3.2.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "vis-data": "^8.0.3",
+    "vis-network": "^10.0.2"
   },
   "devDependencies": {
+    "@vitejs/plugin-legacy": "^5.4.3",
     "@vitejs/plugin-react": "^4.2.1",
+    "terser": "^5.44.1",
     "vite": "^5.0.0",
     "vite-plugin-pwa": "^0.17.4"
   }

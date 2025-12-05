@@ -275,6 +275,711 @@ const initialData = {
 
 const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
 const collectAllLinkableTitles = (books) => { const m = new Map(); const c = (es, bid, bt) => es.forEach(e => { if (e.linkable) { if (!m.has(e.title)) m.set(e.title, []); m.get(e.title).push({ bookId: bid, bookTitle: bt, entry: e }); } if (e.children?.length) c(e.children, bid, bt); }); books.forEach(b => c(b.entries, b.id, b.title)); return m; };
+
+// ============ 人设模式组件 ============
+
+// 人设卡片组件 - 工牌风格
+const CharacterCard = ({ entry, style = 'dark', onClick, onLongPress, index }) => {
+  const longPressTimer = useRef(null);
+  
+  const handleTouchStart = (e) => {
+    if (onLongPress) {
+      longPressTimer.current = setTimeout(() => {
+        if (navigator.vibrate) navigator.vibrate(30);
+        onLongPress(e, entry);
+      }, 500);
+    }
+  };
+  
+  const handleTouchEnd = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
+  if (style === 'dark') {
+    // 深色工牌风格
+    return (
+      <div 
+        className="character-card dark" 
+        onClick={() => onClick(entry)}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+        onTouchMove={handleTouchEnd}
+      >
+        <div className="card-avatar">
+          {entry.avatar ? (
+            <img src={entry.avatar} alt="" />
+          ) : (
+            <span className="placeholder">👤</span>
+          )}
+          <span className="card-number">No.{String(index + 1).padStart(2, '0')}</span>
+        </div>
+        <div className="card-name">{entry.title}</div>
+        <div className="card-tags">
+          {entry.tags?.slice(0, 3).map((tag, i) => (
+            <span key={i} className={`tag ${i === 0 ? 'highlight' : ''}`}>{tag}</span>
+          ))}
+        </div>
+        <div className="card-footer">
+          <span className="divider"></span>
+          <span className="arrow">▶</span>
+        </div>
+        {entry.linkable && <div className="stamp">存</div>}
+      </div>
+    );
+  } else {
+    // 复古档案风格
+    return (
+      <div 
+        className="character-card-v2" 
+        onClick={() => onClick(entry)}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+        onTouchMove={handleTouchEnd}
+      >
+        <div className="card-v2-header">
+          <span className="label">人 物 档 案</span>
+          <span className="code">#{String(index + 1).padStart(3, '0')}</span>
+        </div>
+        <div className="card-v2-body">
+          <div className="card-v2-avatar">
+            {entry.avatar ? (
+              <img src={entry.avatar} alt="" />
+            ) : (
+              <span className="placeholder">👤</span>
+            )}
+          </div>
+          <div className="card-v2-info">
+            <div className="card-v2-name">{entry.title}</div>
+            <div className="card-v2-tags">
+              {entry.tags?.slice(0, 3).map((tag, i) => (
+                <span key={i} className="tag">{tag}</span>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="card-v2-footer">
+          <div className="card-v2-stamp">{entry.linkable ? '存档' : ''}</div>
+          <span className="card-v2-arrow">详情 ▶</span>
+        </div>
+      </div>
+    );
+  }
+};
+
+// 新建人设卡片
+const AddCharacterCard = ({ style = 'dark', onClick }) => {
+  if (style === 'dark') {
+    return (
+      <div className="character-card dark add-new" onClick={onClick}>
+        <span className="add-icon">+</span>
+        <span className="add-text">新建人设</span>
+      </div>
+    );
+  } else {
+    return (
+      <div className="character-card-v2 add-new" onClick={onClick}>
+        <span className="add-icon">+</span>
+        <span className="add-text">新建人设</span>
+      </div>
+    );
+  }
+};
+
+// 人设详情页（完整词条页，上方身份证+下方内容编辑）
+const CharacterDetailPage = ({ entry, onClose, onSave, isReadOnly, cardStyle, allTitlesMap, onLinkClick, bookName }) => {
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [content, setContent] = useState(entry?.content || '');
+  const contentRef = useRef(null);
+  
+  useEffect(() => {
+    if (entry) {
+      setContent(entry.content || '');
+    }
+  }, [entry]);
+  
+  // 渲染内容并绑定链接点击事件
+  useEffect(() => {
+    if (!contentRef.current || !content || isEditMode) return;
+    
+    // 先处理换行，再处理链接
+    let html = content
+      .split('\n')
+      .map(line => line || '<br>')
+      .join('<br>');
+    
+    html = html.replace(/【([^】]+)】/g, (m, kw) => {
+      const targets = allTitlesMap?.get?.(kw);
+      return targets?.length 
+        ? `<span class="char-link" data-kw="${kw}">【${kw}】</span>` 
+        : `<span class="char-link broken">【${kw}】</span>`;
+    });
+    
+    contentRef.current.innerHTML = html;
+    
+    contentRef.current.querySelectorAll('.char-link:not(.broken)').forEach(el => {
+      el.onclick = () => {
+        const targets = allTitlesMap?.get?.(el.dataset.kw);
+        if (targets?.length && onLinkClick) {
+          const target = targets[0];
+          onLinkClick(el.dataset.kw, target.bookId, target.entry.id);
+        }
+      };
+    });
+  }, [content, allTitlesMap, onLinkClick, isEditMode]);
+  
+  if (!entry) return null;
+  
+  const handleSaveContent = () => {
+    if (onSave) {
+      onSave({ ...entry, content });
+    }
+    setIsEditMode(false);
+  };
+  
+  return (
+    <div className="character-detail-page">
+      <div className="character-detail-header">
+        <button className="back-btn" onClick={onClose}>←</button>
+        <h2>人物档案</h2>
+        {!isReadOnly && (
+          <div className="read-mode-toggle" onClick={() => {
+            if (isEditMode) handleSaveContent();
+            else setIsEditMode(true);
+          }}>
+            <span className={`toggle-label ${!isEditMode ? 'active' : ''}`}>阅读</span>
+            <div className={`toggle-switch ${isEditMode ? 'edit-mode' : ''}`}>
+              <div className="toggle-knob" />
+            </div>
+            <span className={`toggle-label ${isEditMode ? 'active' : ''}`}>编辑</span>
+          </div>
+        )}
+      </div>
+      
+      <div className="character-detail-content">
+        {/* 身份证卡片 - 米棕色风格 */}
+        <div className={`char-profile-card ${cardStyle}`}>
+          <div className="profile-main">
+            <div className="profile-avatar">
+              {entry.avatar ? (
+                <img src={entry.avatar} alt="" />
+              ) : (
+                <span className="avatar-placeholder">👤</span>
+              )}
+            </div>
+            <div className="profile-info">
+              <h1 className="profile-name">{entry.title}</h1>
+              {entry.tags?.length > 0 && (
+                <div className="profile-tags">
+                  {entry.tags.map((tag, i) => (
+                    <span key={i} className="profile-tag">{tag}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          
+          {entry.summary && (
+            <div className="profile-summary">
+              <div className="summary-label">简介</div>
+              <p>{entry.summary}</p>
+            </div>
+          )}
+          
+          <div className="profile-stamp">✦ {bookName || '一页穹顶'} ✦</div>
+        </div>
+        
+        {/* 详细设定 - 有背景边框，无内部滚动 */}
+        <div className="char-detail-section">
+          <div className="detail-title">📝 详细设定</div>
+          <div className="detail-box">
+            {isEditMode ? (
+              <textarea
+                className="detail-editor"
+                value={content}
+                onChange={e => {
+                  setContent(e.target.value);
+                  // 自动调整高度
+                  e.target.style.height = 'auto';
+                  e.target.style.height = e.target.scrollHeight + 'px';
+                }}
+                onFocus={e => {
+                  e.target.style.height = 'auto';
+                  e.target.style.height = e.target.scrollHeight + 'px';
+                }}
+                placeholder="在这里记录角色的详细设定、背景故事、性格特点...&#10;&#10;💡 使用【词条名】可以链接到其他词条"
+              />
+            ) : (
+              <div className="detail-content">
+                {content ? (
+                  <div ref={contentRef} className="detail-body" />
+                ) : (
+                  <p className="empty-hint">暂无详细设定，切换到编辑模式添加内容</p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// 人设编辑弹窗
+const CharacterEditModal = ({ isOpen, onClose, onSave, editingEntry }) => {
+  const [name, setName] = useState('');
+  const [tags, setTags] = useState('');
+  const [summary, setSummary] = useState('');
+  const [avatar, setAvatar] = useState(null);
+  const fileRef = useRef(null);
+  
+  useEffect(() => {
+    if (isOpen) {
+      if (editingEntry) {
+        setName(editingEntry.title || '');
+        setTags(editingEntry.tags?.join('、') || '');
+        setSummary(editingEntry.summary || '');
+        setAvatar(editingEntry.avatar || null);
+      } else {
+        setName('');
+        setTags('');
+        setSummary('');
+        setAvatar(null);
+      }
+    }
+  }, [editingEntry, isOpen]);
+  
+  const handleAvatarUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => setAvatar(ev.target.result);
+    reader.readAsDataURL(file);
+  };
+  
+  const handleSave = () => {
+    if (!name.trim()) return;
+    const tagList = tags.split(/[,，、\s]+/).filter(t => t.trim());
+    onSave({
+      title: name.trim(),
+      tags: tagList,
+      summary: summary.trim(),
+      avatar
+    });
+    onClose();
+  };
+  
+  if (!isOpen) return null;
+  
+  return (
+    <div className="modal-overlay character-modal-overlay" onClick={onClose}>
+      <div className="modal-content character-edit-modal" onClick={e => e.stopPropagation()}>
+        <h3>{editingEntry ? '编辑人设' : '新建人设'}</h3>
+        
+        <div className="avatar-upload" onClick={() => fileRef.current?.click()}>
+          {avatar ? (
+            <img src={avatar} alt="" />
+          ) : (
+            <span className="upload-placeholder">+ 头像</span>
+          )}
+          <input ref={fileRef} type="file" accept="image/*" onChange={handleAvatarUpload} style={{ display: 'none' }} />
+        </div>
+        
+        <input 
+          type="text" 
+          placeholder="姓名 *" 
+          value={name} 
+          onChange={e => setName(e.target.value)} 
+          autoFocus 
+        />
+        <input 
+          type="text" 
+          placeholder="标签（用顿号分隔，如：主角、22岁、莱塔尼亚）" 
+          value={tags} 
+          onChange={e => setTags(e.target.value)} 
+        />
+        <textarea 
+          placeholder="简介（可选）" 
+          value={summary} 
+          onChange={e => setSummary(e.target.value)} 
+          rows={3}
+        />
+        
+        <div className="modal-actions">
+          <button className="btn-cancel" onClick={onClose}>取消</button>
+          <button className="btn-save" onClick={handleSave} disabled={!name.trim()}>
+            {editingEntry ? '保存' : '创建'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// 关系网页面 - 重新设计UI
+const RelationNetworkPage = ({ isOpen, onClose, entries, relations, onAddRelation, onDeleteRelation, onUpdateRelation, bookTitle, cardStyle }) => {
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [selectedPerson, setSelectedPerson] = useState(null);
+  const [expandedRelation, setExpandedRelation] = useState(null);
+  const [editingStory, setEditingStory] = useState(null);
+  const [storyText, setStoryText] = useState('');
+  const [contextMenu, setContextMenu] = useState({ show: false, x: 0, y: 0, relation: null });
+  const [editingRelation, setEditingRelation] = useState(null);
+  const longPressTimer = useRef(null);
+  
+  if (!isOpen) return null;
+  
+  const getEntry = (id) => entries.find(e => e.id === id);
+  
+  // 根据筛选显示关系
+  const filteredRelations = selectedPerson
+    ? (relations || []).filter(r => r.from === selectedPerson || r.to === selectedPerson)
+    : (relations || []);
+  
+  const handleDeleteRelation = (relationId) => {
+    onDeleteRelation(relationId);
+    setExpandedRelation(null);
+    setContextMenu({ show: false });
+  };
+  
+  const handleSaveStory = (relationId) => {
+    if (onUpdateRelation) {
+      const relation = relations.find(r => r.id === relationId);
+      if (relation) {
+        onUpdateRelation({ ...relation, story: storyText });
+      }
+    }
+    setEditingStory(null);
+    setStoryText('');
+  };
+  
+  const startEditStory = (relation) => {
+    setEditingStory(relation.id);
+    setStoryText(relation.story || '');
+  };
+  
+  // 长按处理
+  const handleLongPressStart = (e, relation) => {
+    const touch = e.touches?.[0] || e;
+    longPressTimer.current = setTimeout(() => {
+      setContextMenu({
+        show: true,
+        x: touch.clientX,
+        y: touch.clientY,
+        relation
+      });
+    }, 500);
+  };
+  
+  const handleLongPressEnd = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+  
+  // 开始编辑关系
+  const handleEditRelation = (relation) => {
+    setEditingRelation(relation);
+    setContextMenu({ show: false });
+  };
+  
+  return (
+    <div className="relation-network-page">
+      <div className="network-header">
+        <button className="back-btn" onClick={onClose}>←</button>
+        <h2>{bookTitle} · 关系网</h2>
+        <button className="add-relation-btn" onClick={() => setShowAddModal(true)}>+ 添加</button>
+      </div>
+      
+      <div className="relation-list-container">
+        {/* 人物头像栏 */}
+        <div className="relation-avatars">
+          {entries.map(e => (
+            <div 
+              key={e.id} 
+              className={`relation-avatar-item ${selectedPerson === e.id ? 'selected' : ''}`}
+              onClick={() => setSelectedPerson(selectedPerson === e.id ? null : e.id)}
+            >
+              <div className="avatar-circle">
+                {e.avatar ? <img src={e.avatar} alt="" /> : '👤'}
+              </div>
+              <span className="avatar-name">{e.title}</span>
+            </div>
+          ))}
+        </div>
+        
+        {/* 关系列表 */}
+        <div className="relation-list">
+          {filteredRelations.length === 0 ? (
+            <div className="relation-empty">
+              <span>🕸️</span>
+              <p>{selectedPerson ? '该角色暂无关系' : '还没有添加关系'}</p>
+              <p>点击右上角添加</p>
+            </div>
+          ) : (
+            filteredRelations.map(r => {
+              const fromEntry = getEntry(r.from);
+              const toEntry = getEntry(r.to);
+              if (!fromEntry || !toEntry) return null;
+              const isExpanded = expandedRelation === r.id;
+              
+              return (
+                <div 
+                  key={r.id} 
+                  className={`relation-card ${isExpanded ? 'expanded' : ''}`}
+                  onTouchStart={(e) => handleLongPressStart(e, r)}
+                  onTouchEnd={handleLongPressEnd}
+                  onTouchMove={handleLongPressEnd}
+                >
+                  {/* 关系主体 */}
+                  <div 
+                    className="relation-card-main"
+                    onClick={() => setExpandedRelation(isExpanded ? null : r.id)}
+                  >
+                    {/* 左侧人物 */}
+                    <div className="relation-person">
+                      <div className="person-avatar">
+                        {fromEntry.avatar ? <img src={fromEntry.avatar} alt="" /> : '👤'}
+                      </div>
+                      <span className="person-name">{fromEntry.title}</span>
+                    </div>
+                    
+                    {/* 中间关系 */}
+                    <div className="relation-connector">
+                      <div className="connector-line" style={{ borderColor: r.color || '#6B5B4F' }}>
+                        <span className="connector-label">{r.label || '—'}</span>
+                      </div>
+                      <span className="connector-arrow">
+                        {r.arrowDir === 'both' ? '⟷' : r.arrowDir === 'backward' ? '⟵' : '⟶'}
+                      </span>
+                    </div>
+                    
+                    {/* 右侧人物 */}
+                    <div className="relation-person">
+                      <div className="person-avatar">
+                        {toEntry.avatar ? <img src={toEntry.avatar} alt="" /> : '👤'}
+                      </div>
+                      <span className="person-name">{toEntry.title}</span>
+                    </div>
+                    
+                    {/* 展开指示 */}
+                    <span className="expand-indicator">{isExpanded ? '︿' : '﹀'}</span>
+                  </div>
+                  
+                  {/* 展开内容 - 故事备忘 */}
+                  {isExpanded && (
+                    <div className="relation-card-expand">
+                      <div className="story-section">
+                        <div className="story-header">
+                          <span>📖 故事备忘</span>
+                          {editingStory !== r.id && (
+                            <button onClick={() => startEditStory(r)}>
+                              {r.story ? '编辑' : '+ 添加'}
+                            </button>
+                          )}
+                        </div>
+                        
+                        {editingStory === r.id ? (
+                          <div className="story-editor">
+                            <textarea
+                              value={storyText}
+                              onChange={e => setStoryText(e.target.value)}
+                              placeholder="记录这两个角色之间的故事..."
+                              autoFocus
+                            />
+                            <div className="story-btns">
+                              <button className="cancel" onClick={() => setEditingStory(null)}>取消</button>
+                              <button className="save" onClick={() => handleSaveStory(r.id)}>保存</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="story-content">
+                            {r.story || <span className="no-story">暂无记录，点击添加</span>}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+        
+        {/* 统计 */}
+        <div className="relation-stats">
+          {entries.length} 位角色 · {(relations || []).length} 条关系
+        </div>
+      </div>
+      
+      {/* 长按菜单 */}
+      {contextMenu.show && (
+        <>
+          <div className="relation-context-overlay" onClick={() => setContextMenu({ show: false })} />
+          <div 
+            className="relation-context-menu"
+            style={{ 
+              top: Math.min(contextMenu.y, window.innerHeight - 120),
+              left: Math.min(contextMenu.x - 60, window.innerWidth - 130)
+            }}
+          >
+            <button onClick={() => handleEditRelation(contextMenu.relation)}>
+              <span>✏️</span>编辑关系
+            </button>
+            <button className="danger" onClick={() => handleDeleteRelation(contextMenu.relation.id)}>
+              <span>🗑️</span>删除关系
+            </button>
+          </div>
+        </>
+      )}
+      
+      {/* 添加/编辑关系弹窗 */}
+      {(showAddModal || editingRelation) && (
+        <AddRelationModal 
+          isOpen={true}
+          onClose={() => { setShowAddModal(false); setEditingRelation(null); }}
+          entries={entries}
+          editingRelation={editingRelation}
+          onSave={(relation) => {
+            if (editingRelation) {
+              onUpdateRelation(relation);
+            } else {
+              onAddRelation(relation);
+            }
+            setShowAddModal(false);
+            setEditingRelation(null);
+          }}
+        />
+      )}
+    </div>
+  );
+};
+
+// 添加/编辑关系弹窗 - 简化版
+const AddRelationModal = ({ isOpen, onClose, entries, onSave, editingRelation }) => {
+  const [fromId, setFromId] = useState('');
+  const [toId, setToId] = useState('');
+  const [label, setLabel] = useState('');
+  const [arrowDir, setArrowDir] = useState('forward');
+  
+  // 编辑模式时填充数据
+  useEffect(() => {
+    if (editingRelation) {
+      setFromId(editingRelation.from || '');
+      setToId(editingRelation.to || '');
+      setLabel(editingRelation.label || '');
+      setArrowDir(editingRelation.arrowDir || 'forward');
+    } else {
+      setFromId('');
+      setToId('');
+      setLabel('');
+      setArrowDir('forward');
+    }
+  }, [editingRelation, isOpen]);
+  
+  const handleSave = () => {
+    if (!fromId || !toId || fromId === toId) return;
+    
+    onSave({
+      id: editingRelation?.id || Date.now().toString(),
+      from: fromId,
+      to: toId,
+      label: label.trim(),
+      arrowDir,
+      story: editingRelation?.story || ''
+    });
+    
+    onClose();
+  };
+  
+  if (!isOpen) return null;
+  
+  const getEntryName = (id) => entries.find(e => e.id === id)?.title || '';
+  
+  return (
+    <div className="modal-overlay relation-modal-overlay" onClick={onClose}>
+      <div className="modal-content relation-modal" onClick={e => e.stopPropagation()}>
+        <h3>{editingRelation ? '编辑关系' : '添加关系'}</h3>
+        
+        <div className="relation-form">
+          <div className="relation-people">
+            <div className="relation-select-wrap">
+              <select value={fromId} onChange={e => setFromId(e.target.value)}>
+                <option value="">选择人物</option>
+                {entries.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
+              </select>
+            </div>
+            <span className="relation-arrow">→</span>
+            <div className="relation-select-wrap">
+              <select value={toId} onChange={e => setToId(e.target.value)}>
+                <option value="">选择人物</option>
+                {entries.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
+              </select>
+            </div>
+          </div>
+          
+          <input 
+            type="text" 
+            placeholder={fromId && toId ? `${getEntryName(fromId)} 对 ${getEntryName(toId)} 的关系` : '关系描述（如：暗恋、师徒、死敌）'}
+            value={label}
+            onChange={e => setLabel(e.target.value)}
+          />
+          
+          <div className="relation-options">
+            <div className="option-group">
+              <span>方向</span>
+              <div className="option-buttons">
+                <button className={arrowDir === 'forward' ? 'active' : ''} onClick={() => setArrowDir('forward')}>A → B</button>
+                <button className={arrowDir === 'both' ? 'active' : ''} onClick={() => setArrowDir('both')}>A ↔ B</button>
+                <button className={arrowDir === 'none' ? 'active' : ''} onClick={() => setArrowDir('none')}>A — B</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div className="modal-actions">
+          <button className="btn-cancel" onClick={onClose}>取消</button>
+          <button 
+            className="btn-save" 
+            onClick={handleSave}
+            disabled={!fromId || !toId || fromId === toId}
+          >
+            {editingRelation ? '保存' : '添加'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// 人设模式下的+菜单
+const CharacterAddMenu = ({ isOpen, onClose, onAddCharacter, onOpenRelationNetwork, onReorder }) => {
+  if (!isOpen) return null;
+  return (
+    <>
+      <div className="add-menu-overlay" onClick={onClose} />
+      <div className="add-menu character-add-menu">
+        <div className="add-menu-item" onClick={() => { onAddCharacter(); onClose(); }}>
+          <span className="menu-icon">👤</span>
+          <span>新建人设</span>
+        </div>
+        <div className="add-menu-item" onClick={() => { onOpenRelationNetwork(); onClose(); }}>
+          <span className="menu-icon">🕸️</span>
+          <span>关系网</span>
+        </div>
+        <div className="add-menu-item" onClick={() => { onReorder(); onClose(); }}>
+          <span className="menu-icon">↕️</span>
+          <span>调整排序</span>
+        </div>
+      </div>
+    </>
+  );
+};
+
+// ============ 人设模式组件结束 ============
 const findEntryPath = (es, tid, p = []) => { for (const e of es) { const cp = [...p, e]; if (e.id === tid) return cp; if (e.children?.length) { const f = findEntryPath(e.children, tid, cp); if (f) return f; } } return null; };
 const findEntryById = (es, id) => { for (const e of es) { if (e.id === id) return e; if (e.children?.length) { const f = findEntryById(e.children, id); if (f) return f; } } return null; };
 const getAllChildContent = (e, all) => { let r = []; const c = (x) => { if (!x) return; if (x.content || !x.isFolder) r.push(x); if (x.children?.length) x.children.forEach(ch => c(findEntryById(all, ch.id) || ch)); }; if (e?.children?.length) e.children.forEach(ch => c(findEntryById(all, ch.id) || ch)); return r; };
@@ -504,7 +1209,7 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, showToast }) => {
 };
 
 // 设置页面组件
-const SettingsPage = ({ isOpen, isClosing, onClose, user, onLogout, myInviteCode, onGenerateCode, onResetCode, formatCoordinate, syncStatus, lastSyncTime, onSyncNow, showRocketBtn, onToggleRocketBtn, showToast }) => {
+const SettingsPage = ({ isOpen, isClosing, onClose, user, onLogout, myInviteCode, onGenerateCode, onResetCode, formatCoordinate, syncStatus, lastSyncTime, onSyncNow, showRocketBtn, onToggleRocketBtn, showToast, characterCardStyle, onChangeCardStyle }) => {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   
   if (!isOpen) return null;
@@ -592,6 +1297,34 @@ const SettingsPage = ({ isOpen, isClosing, onClose, user, onLogout, myInviteCode
             </div>
           </div>
         )}
+
+        {/* 人设卡片风格 */}
+        <div className="settings-section">
+          <h3>👤 人设卡片风格</h3>
+          <p className="settings-hint">选择人设模式下的卡片样式</p>
+          <div className="card-style-options">
+            <div 
+              className={`card-style-option ${characterCardStyle === 'dark' ? 'active' : ''}`}
+              onClick={() => onChangeCardStyle('dark')}
+            >
+              <div className="style-preview dark-preview">
+                <div className="preview-avatar">👤</div>
+                <div className="preview-name">深色工牌</div>
+              </div>
+              <span className="style-label">深色工牌</span>
+            </div>
+            <div 
+              className={`card-style-option ${characterCardStyle === 'light' ? 'active' : ''}`}
+              onClick={() => onChangeCardStyle('light')}
+            >
+              <div className="style-preview light-preview">
+                <div className="preview-avatar">👤</div>
+                <div className="preview-name">复古档案</div>
+              </div>
+              <span className="style-label">复古档案</span>
+            </div>
+          </div>
+        </div>
       </div>
       
       {/* 重置确认弹窗 */}
@@ -720,7 +1453,13 @@ const RocketModal = ({ isOpen, onClose, onFly, showToast, onLaunchStart }) => {
     </div>
   );
 };
-const ContextMenu = ({ isOpen, position, onClose, options }) => isOpen ? (<><div className="context-overlay" onClick={onClose} /><div className="context-menu" style={{ top: position.y, left: Math.min(position.x, window.innerWidth - 180) }}>{options.map((o, i) => (<div key={i} className={`context-item ${o.danger ? 'danger' : ''}`} onClick={() => { o.action(); onClose(); }}><span className="context-icon">{o.icon}</span>{o.label}</div>))}</div></>) : null;
+const ContextMenu = ({ isOpen, position, onClose, options }) => {
+  if (!isOpen) return null;
+  const menuH = options.length * 50 + 20;
+  const spaceBelow = window.innerHeight - position.y;
+  const top = spaceBelow < menuH ? Math.max(10, position.y - menuH) : position.y;
+  return (<><div className="context-overlay" onClick={onClose} /><div className="context-menu" style={{ top, left: Math.min(position.x, window.innerWidth - 180) }}>{options.map((o, i) => (<div key={i} className={`context-item ${o.danger ? 'danger' : ''}`} onClick={() => { o.action(); onClose(); }}><span className="context-icon">{o.icon}</span>{o.label}</div>))}</div></>);
+};
 
 const EntryModal = ({ isOpen, onClose, onSave, editingEntry, parentTitle, isFolder }) => {
   const [title, setTitle] = useState('');
@@ -729,6 +1468,115 @@ const EntryModal = ({ isOpen, onClose, onSave, editingEntry, parentTitle, isFold
   useEffect(() => { if (editingEntry) { setTitle(editingEntry.title || ''); setSummary(editingEntry.summary || ''); } else { setTitle(''); setSummary(''); setCreateAsFolder(isFolder || false); } }, [editingEntry, isOpen, isFolder]);
   if (!isOpen) return null;
   return (<div className="modal-overlay" onClick={onClose}><div className="modal-content" onClick={e => e.stopPropagation()}><h3>{editingEntry ? '编辑词条' : (createAsFolder ? '新建分类' : '新建词条')}</h3>{parentTitle && <p className="modal-hint">添加到: {parentTitle}</p>}<input type="text" placeholder="标题" value={title} onChange={e => setTitle(e.target.value)} autoFocus /><input type="text" placeholder="简介（可选）" value={summary} onChange={e => setSummary(e.target.value)} />{!editingEntry && <label className="checkbox-label"><input type="checkbox" checked={createAsFolder} onChange={e => setCreateAsFolder(e.target.checked)} /><span>创建为分类文件夹</span></label>}<div className="modal-actions"><button className="btn-cancel" onClick={onClose}>取消</button><button className="btn-save" onClick={() => { if (title.trim()) { onSave({ title: title.trim(), summary: summary.trim(), isFolder: createAsFolder }); onClose(); } }} disabled={!title.trim()}>{editingEntry ? '保存' : '创建'}</button></div></div></div>);
+};
+
+// 移动词条弹窗
+const MoveModal = ({ isOpen, onClose, entry, entries, currentParentId, onMove }) => {
+  const [expandedIds, setExpandedIds] = useState(new Set());
+  
+  if (!isOpen || !entry) return null;
+  
+  // 递归构建树形结构
+  const buildTree = (items, excluded, parentId = null, depth = 0) => {
+    const results = [];
+    for (const item of items) {
+      if (item.id === excluded) continue;
+      if (item.isFolder && !item.novelMode && !item.characterMode) {
+        const hasChildren = item.children?.some(c => 
+          c.isFolder && !c.novelMode && !c.characterMode && c.id !== excluded
+        );
+        results.push({ 
+          id: item.id, 
+          title: item.title, 
+          depth, 
+          parentId,
+          hasChildren,
+          children: hasChildren ? buildTree(item.children, excluded, item.id, depth + 1) : []
+        });
+      }
+    }
+    return results;
+  };
+  
+  const tree = buildTree(entries, entry.id);
+  
+  const toggleExpand = (id, e) => {
+    e.stopPropagation();
+    setExpandedIds(prev => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  };
+  
+  // 渲染树形列表
+  const renderTree = (nodes) => {
+    return nodes.map(node => {
+      const isExpanded = expandedIds.has(node.id);
+      const isCurrent = node.id === currentParentId;
+      
+      return (
+        <div key={node.id}>
+          <div 
+            className={`move-target-item ${isCurrent ? 'current' : ''}`}
+            style={{ paddingLeft: 16 + node.depth * 20 }}
+          >
+            {node.hasChildren && (
+              <span 
+                className={`expand-toggle ${isExpanded ? 'expanded' : ''}`}
+                onClick={(e) => toggleExpand(node.id, e)}
+              >
+                ▶
+              </span>
+            )}
+            {!node.hasChildren && <span className="expand-placeholder" />}
+            <span className="move-target-icon">📁</span>
+            <span 
+              className="move-target-name"
+              onClick={() => { if (!isCurrent) { onMove(entry.id, node.id); onClose(); } }}
+            >
+              {node.title}
+            </span>
+            {isCurrent && <span className="current-badge">当前位置</span>}
+          </div>
+          {isExpanded && node.children.length > 0 && renderTree(node.children)}
+        </div>
+      );
+    });
+  };
+  
+  const isAtRoot = currentParentId === null;
+  
+  return (
+    <div className="modal-overlay move-modal-overlay" onClick={onClose}>
+      <div className="modal-content move-modal" onClick={e => e.stopPropagation()}>
+        <h3>移动到...</h3>
+        <p className="move-entry-name">「{entry.title}」</p>
+        <div className="move-target-list">
+          {/* 顶层选项 */}
+          <div 
+            className={`move-target-item root-item ${isAtRoot ? 'current' : ''}`}
+            onClick={() => { if (!isAtRoot) { onMove(entry.id, null); onClose(); } }}
+          >
+            <span className="expand-placeholder" />
+            <span className="move-target-icon">📚</span>
+            <span className="move-target-name">书籍顶层</span>
+            {isAtRoot && <span className="current-badge">当前位置</span>}
+          </div>
+          
+          {/* 分类树 */}
+          {renderTree(tree)}
+          
+          {tree.length === 0 && (
+            <div className="move-empty">暂无其他分类可选</div>
+          )}
+        </div>
+        <div className="modal-actions">
+          <button className="btn-cancel" onClick={onClose}>取消</button>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 const BookModal = ({ isOpen, onClose, onSave, editingBook }) => {
@@ -1842,6 +2690,8 @@ export default function App() {
   const [userBio, setUserBio] = useState(() => localStorage.getItem('userBio') || '');
   const [userBg, setUserBg] = useState(() => localStorage.getItem('userBg') || '');
   const [showTotalGallery, setShowTotalGallery] = useState(false);
+  const [showMoveModal, setShowMoveModal] = useState(false);
+  const [moveTarget, setMoveTarget] = useState(null); // 要移动的词条
   const avatarUploadRef = useRef(null);
   const bgUploadRef = useRef(null);
   const [userName, setUserName] = useState(() => localStorage.getItem('userName') || '创作者');
@@ -1865,6 +2715,7 @@ export default function App() {
   const galleryUploadRef = useRef(null);
   const longPressTimer = useRef(null);
   const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
   const editorRef = useRef(null);
   const savedSelection = useRef(null);
   
@@ -1897,6 +2748,12 @@ export default function App() {
   const [visitingBookshelf, setVisitingBookshelf] = useState(null); // 正在访问的书架数据
   const [visitingProfile, setVisitingProfile] = useState(null); // 正在访问的用户资料
   const [showRocketBtn, setShowRocketBtn] = useState(() => localStorage.getItem('showRocketBtn') !== 'false');
+  const [characterCardStyle, setCharacterCardStyle] = useState(() => localStorage.getItem('characterCardStyle') || 'dark');
+  const [showCharacterModal, setShowCharacterModal] = useState(false);
+  const [editingCharacter, setEditingCharacter] = useState(null);
+  const [showCharacterDetail, setShowCharacterDetail] = useState(null);
+  const [showRelationNetwork, setShowRelationNetwork] = useState(false);
+  const [showCharacterAddMenu, setShowCharacterAddMenu] = useState(false);
   // 书籍排序相关
   const [isBookReorderMode, setIsBookReorderMode] = useState(false);
   const [draggingBookId, setDraggingBookId] = useState(null);
@@ -1945,6 +2802,43 @@ export default function App() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // 处理浏览器/手机返回键
+  useEffect(() => {
+    const handlePopState = (e) => {
+      // 阻止默认退出行为，执行应用内返回
+      if (showCharacterDetail) {
+        setShowCharacterDetail(null);
+      } else if (showRelationNetwork) {
+        setShowRelationNetwork(false);
+      } else if (showGallery) {
+        setGalleryClosing(true);
+        setTimeout(() => { setShowGallery(false); setGalleryClosing(false); }, 280);
+      } else if (showSettings) {
+        setSettingsClosing(true);
+        setTimeout(() => { setShowSettings(false); setSettingsClosing(false); }, 280);
+      } else if (showLibrary) {
+        setLibraryClosing(true);
+        setTimeout(() => { setShowLibrary(false); setLibraryClosing(false); }, 280);
+      } else if (showStoryReader) {
+        setShowStoryReader(false);
+      } else if (showStoryToc) {
+        setShowStoryToc(false);
+      } else if (currentEntry || navigationStack.length > 0) {
+        handleBack();
+      } else if (currentBook) {
+        handleBackToShelf();
+      }
+      // 重新push一个state，保持history栈
+      window.history.pushState({ app: true }, '');
+    };
+    
+    // 初始push一个state
+    window.history.pushState({ app: true }, '');
+    window.addEventListener('popstate', handlePopState);
+    
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [currentBook, currentEntry, navigationStack, showCharacterDetail, showRelationNetwork, showGallery, showSettings, showLibrary, showStoryReader, showStoryToc]);
 
   // 用户登录后加载云端数据
   useEffect(() => {
@@ -2176,6 +3070,11 @@ export default function App() {
   const toggleRocketBtn = (show) => {
     setShowRocketBtn(show);
     localStorage.setItem('showRocketBtn', show.toString());
+  };
+
+  const changeCardStyle = (style) => {
+    setCharacterCardStyle(style);
+    localStorage.setItem('characterCardStyle', style);
   };
 
   // 保存当前选区
@@ -2413,14 +3312,26 @@ export default function App() {
           { icon: '✏️', label: '编辑信息', action: () => { setEditingEntry(item); setShowEntryModal(true); } }, 
           { icon: item.linkable ? '🚫' : '⭐', label: item.linkable ? '关闭跳转' : '开启跳转', action: () => setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, item.id, { linkable: !item.linkable }) } : b) })) }
         ];
-        // 如果是文件夹，添加正文模式选项
+        // 如果是文件夹，添加正文模式和人设模式选项
         if (item.isFolder) {
-          opts.push({ 
-            icon: item.novelMode ? '📝' : '📖', 
-            label: item.novelMode ? '关闭正文模式' : '开启正文模式', 
-            action: () => setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, item.id, { novelMode: !item.novelMode }) } : b) })) 
-          });
+          // 正文模式（与人设模式互斥）
+          if (!item.characterMode) {
+            opts.push({ 
+              icon: item.novelMode ? '📝' : '📖', 
+              label: item.novelMode ? '关闭正文模式' : '开启正文模式', 
+              action: () => setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, item.id, { novelMode: !item.novelMode }) } : b) })) 
+            });
+          }
+          // 人设模式（与正文模式互斥）
+          if (!item.novelMode) {
+            opts.push({ 
+              icon: item.characterMode ? '📝' : '👤', 
+              label: item.characterMode ? '关闭人设模式' : '开启人设模式', 
+              action: () => setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, item.id, { characterMode: !item.characterMode, characterRelations: item.characterRelations || [] }) } : b) })) 
+            });
+          }
         }
+        opts.push({ icon: '📁', label: '移动到...', action: () => { setMoveTarget(item); setShowMoveModal(true); } });
         opts.push({ icon: '🗑️', label: '删除', danger: true, action: () => setConfirmModal({ isOpen: true, title: '确认删除', message: `删除「${item.title}」？`, onConfirm: () => { setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: deleteEntryFromTree(b.entries, item.id) } : b) })); if (currentEntry?.id === item.id) handleBack(); setConfirmModal({ isOpen: false }); } }) });
       } else if (type === 'book') { 
         opts = [
@@ -2444,6 +3355,9 @@ export default function App() {
       // 如果是正文模式的文件夹，进入正文视图
       if (e.novelMode) {
         setViewMode('novel');
+      } else if (e.characterMode) {
+        // 人设模式
+        setViewMode('character');
       } else {
         setViewMode('list');
       }
@@ -2568,6 +3482,41 @@ export default function App() {
   
   const handleAddBook = ({ title, author, tags, emoji, coverImage, showStats }) => { if (editingBook) { const updatedBook = { ...editingBook, title, author, tags, cover: emoji, coverImage, showStats }; setData(prev => ({ ...prev, books: prev.books.map(b => b.id === editingBook.id ? { ...b, title, author, tags, cover: emoji, coverImage, showStats } : b) })); if (currentBook?.id === editingBook.id) { setCurrentBook(prev => ({ ...prev, title, author, tags, cover: emoji, coverImage, showStats })); } setEditingBook(null); } else { const colors = ['#2D3047', '#1A1A2E', '#4A0E0E', '#0E4A2D', '#3D2E4A', '#4A3D0E']; setData(prev => ({ ...prev, books: [...prev.books, { id: generateId(), title, author, tags, cover: emoji, coverImage, showStats, color: colors[Math.floor(Math.random() * colors.length)], entries: [] }] })); } };
   const handleReorder = (fi, ti) => setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: reorderEntriesInParent(b.entries, currentEntry?.id || null, fi, ti) } : b) }));
+  
+  // 移动词条到新位置
+  const handleMoveEntry = (entryId, targetParentId) => {
+    if (!currentBook) return;
+    
+    // 找到要移动的词条
+    const entryToMove = findEntryById(currentBook.entries, entryId);
+    if (!entryToMove) return;
+    
+    // 复制词条（深拷贝）
+    const entryCopy = JSON.parse(JSON.stringify(entryToMove));
+    
+    setData(prev => ({
+      ...prev,
+      books: prev.books.map(b => {
+        if (b.id !== currentBook.id) return b;
+        
+        // 先从原位置删除
+        let newEntries = deleteEntryFromTree(b.entries, entryId);
+        
+        // 再添加到目标位置
+        if (targetParentId === null) {
+          // 移动到根目录
+          newEntries = [...newEntries, entryCopy];
+        } else {
+          // 移动到某个文件夹内
+          newEntries = addEntryToParent(newEntries, targetParentId, entryCopy);
+        }
+        
+        return { ...b, entries: newEntries };
+      })
+    }));
+    
+    showToast(`已移动「${entryToMove.title}」`);
+  };
 
   const handleToggleFormat = (t) => {
     const ed = document.querySelector('.rich-editor');
@@ -2972,6 +3921,122 @@ export default function App() {
   };
   // ============ 正文模式函数结束 ============
 
+  // ============ 人设模式函数 ============
+  
+  // 添加人设
+  const handleAddCharacter = (charData) => {
+    if (!currentEntry?.characterMode) return;
+    
+    const newChar = {
+      id: generateId(),
+      title: charData.title,
+      summary: charData.summary || '',
+      content: '',
+      isFolder: false,
+      linkable: false,
+      avatar: charData.avatar || null,
+      tags: charData.tags || []
+    };
+    
+    setData(prev => ({
+      ...prev,
+      books: prev.books.map(b => b.id === currentBook.id ? {
+        ...b,
+        entries: updateEntryInTree(b.entries, currentEntry.id, {
+          children: [...(currentEntry.children || []), newChar]
+        })
+      } : b)
+    }));
+  };
+  
+  // 更新人设
+  const handleUpdateCharacter = (charData) => {
+    if (!editingCharacter) return;
+    
+    setData(prev => ({
+      ...prev,
+      books: prev.books.map(b => b.id === currentBook.id ? {
+        ...b,
+        entries: updateEntryInTree(b.entries, editingCharacter.id, {
+          title: charData.title,
+          summary: charData.summary || '',
+          avatar: charData.avatar || null,
+          tags: charData.tags || []
+        })
+      } : b)
+    }));
+    
+    setEditingCharacter(null);
+  };
+  
+  // 添加关系
+  const handleAddRelation = (relation) => {
+    if (!currentEntry?.characterMode) return;
+    
+    const currentRelations = currentEntry.characterRelations || [];
+    
+    setData(prev => ({
+      ...prev,
+      books: prev.books.map(b => b.id === currentBook.id ? {
+        ...b,
+        entries: updateEntryInTree(b.entries, currentEntry.id, {
+          characterRelations: [...currentRelations, relation]
+        })
+      } : b)
+    }));
+  };
+  
+  // 删除关系
+  const handleDeleteRelation = (relationId) => {
+    if (!currentEntry?.characterMode) return;
+    
+    setData(prev => ({
+      ...prev,
+      books: prev.books.map(b => b.id === currentBook.id ? {
+        ...b,
+        entries: updateEntryInTree(b.entries, currentEntry.id, {
+          characterRelations: (currentEntry.characterRelations || []).filter(r => r.id !== relationId)
+        })
+      } : b)
+    }));
+  };
+  
+  // 更新关系（包括故事备忘）
+  const handleUpdateRelation = (updatedRelation) => {
+    if (!currentEntry?.characterMode) return;
+    
+    setData(prev => ({
+      ...prev,
+      books: prev.books.map(b => b.id === currentBook.id ? {
+        ...b,
+        entries: updateEntryInTree(b.entries, currentEntry.id, {
+          characterRelations: (currentEntry.characterRelations || []).map(r => 
+            r.id === updatedRelation.id ? updatedRelation : r
+          )
+        })
+      } : b)
+    }));
+  };
+  
+  // 人设卡片点击
+  const handleCharacterClick = (char) => {
+    setShowCharacterDetail(char);
+  };
+  
+  // 人设卡片长按
+  const handleCharacterLongPress = (e, char) => {
+    const touch = e.touches?.[0] || e;
+    const pos = { x: touch.clientX, y: touch.clientY };
+    const opts = [
+      { icon: '✏️', label: '编辑', action: () => { setEditingCharacter(char); setShowCharacterModal(true); } },
+      { icon: char.linkable ? '🚫' : '⭐', label: char.linkable ? '关闭跳转' : '开启跳转', action: () => setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, char.id, { linkable: !char.linkable }) } : b) })) },
+      { icon: '🗑️', label: '删除', danger: true, action: () => setConfirmModal({ isOpen: true, title: '确认删除', message: `删除人设「${char.title}」？`, onConfirm: () => { setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: deleteEntryFromTree(b.entries, char.id) } : b) })); setConfirmModal({ isOpen: false }); } }) }
+    ];
+    setContextMenu({ isOpen: true, position: pos, options: opts });
+  };
+  
+  // ============ 人设模式函数结束 ============
+
   // 上传图片到画廊
   const uploadGalleryImage = async (e) => {
     const files = e.target.files;
@@ -3143,7 +4208,6 @@ export default function App() {
 
   // 长按内容区域显示导出菜单
   const handleContentLongPressStart = (e) => {
-    if (!isReadOnly) return;
     const t = e.touches ? e.touches[0] : e;
     const pos = { x: t.clientX, y: t.clientY };
     contentLongPressTimer.current = setTimeout(() => {
@@ -3276,10 +4340,10 @@ export default function App() {
       }
     }
     setShelfOverscroll(0);
-  }}>{pages.map((pageBooks, pageIndex) => (<div key={pageIndex} className="bookshelf-page"><div className="bookshelf-grid">{pageBooks.map((b, bookIndexInPage) => { const globalIndex = pageIndex * booksPerPage + bookIndexInPage; return b.isAddButton ? (<div key="add" className="book-card add-book" onClick={() => { setEditingBook(null); setShowBookModal(true); }}><div className="book-cover"><span className="add-icon">+</span></div><div className="book-meta"><h2>新建世界</h2></div></div>) : (<div key={b.id} className={`book-card ${isBookReorderMode && draggingBookId === b.id ? 'dragging' : ''} ${isBookReorderMode ? 'reorder-mode' : ''}`} style={{ '--book-color': b.color || '#8B7355' }} onClick={() => !isBookReorderMode && handleBookSelect(b)} onTouchStart={e => { e.stopPropagation(); if (!isVisiting && !isBookReorderMode) handleLongPressStart(e, 'book', b); }} onTouchEnd={!isVisiting ? handleLongPressEnd : undefined} onTouchMove={!isVisiting ? handleLongPressEnd : undefined}><div className="book-spine" /><div className="book-cover">{b.coverImage ? <img src={b.coverImage} alt="" className="cover-image" /> : <span className="book-emoji">{b.cover}</span>}</div><div className="book-shadow" /><div className="book-meta"><h2>{b.title}</h2>{b.author && <p>{b.author} 著</p>}</div>{isBookReorderMode && draggingBookId !== b.id && (<div className="book-drop-zone" onClick={(e) => { e.stopPropagation(); handleMoveBook(draggingBookId, globalIndex); }}>放这里</div>)}</div>); })}</div></div>))}</div>{isVisiting && <div className="return-hint">↓ 轻触星球返航 ↓</div>}{totalPages > 1 && (<div className="shelf-page-dots">{pages.map((_, i) => (<span key={i} className={`shelf-dot ${shelfPage === i ? 'active' : ''}`} onClick={() => { shelfRef.current?.scrollTo({ left: i * shelfRef.current.clientWidth, behavior: 'smooth' }); }} />))}</div>)}<BookModal isOpen={showBookModal} onClose={() => { setShowBookModal(false); setEditingBook(null); }} onSave={handleAddBook} editingBook={editingBook} /><ContextMenu isOpen={contextMenu.isOpen} position={contextMenu.position} onClose={() => setContextMenu({ ...contextMenu, isOpen: false })} options={contextMenu.options} /><ConfirmModal isOpen={confirmModal.isOpen} title={confirmModal.title} message={confirmModal.message} onConfirm={confirmModal.onConfirm} onCancel={() => setConfirmModal({ isOpen: false })} /><SearchModal isOpen={showSearch} onClose={() => { setShowSearch(false); setSearchQuery(''); setSearchResults([]); }} query={searchQuery} setQuery={setSearchQuery} results={searchResults} onSearch={performSearch} onResultClick={handleSearchResultClick} />{showProfile && (<div className={`profile-page ${profileClosing ? 'closing' : ''}`} style={userBg ? { backgroundImage: `url(${userBg})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}}><div className="profile-bg-overlay" /><div className="profile-header"><button className="profile-close" onClick={closeProfile}>×</button><div className="profile-avatar" onClick={() => avatarUploadRef.current?.click()}>{userAvatar ? <img src={userAvatar} alt="" /> : '✨'}</div><input ref={avatarUploadRef} type="file" accept="image/*" onChange={handleAvatarUpload} style={{ display: 'none' }} /><input type="text" className="profile-name" value={userName} onChange={e => saveUserName(e.target.value)} placeholder="点击编辑名字" /><input type="text" className="profile-shelf-title" value={userShelfTitle} onChange={e => saveShelfTitle(e.target.value)} placeholder="自定义书架标题（访客可见）" /><textarea className="profile-bio" value={userBio} onChange={e => saveUserBio(e.target.value)} placeholder="写一句简介..." rows={2} /></div><div className="profile-stats"><div className="stat-item"><span className="stat-number">{totalStats.books}</span><span className="stat-label">作品</span></div><div className="stat-item"><span className="stat-number">{totalStats.entries}</span><span className="stat-label">词条</span></div><div className="stat-item"><span className="stat-number">{totalStats.words.toLocaleString()}</span><span className="stat-label">总字数</span></div></div><div className="profile-menu"><div className="profile-menu-item" onClick={closeProfile}><span>📚</span><span>我的书架</span><span className="menu-arrow">›</span></div><div className="profile-menu-item" onClick={() => setShowLibrary(true)}><span>📖</span><span>图书馆 ({library.books.length})</span><span className="menu-arrow">›</span></div><div className="profile-menu-item" onClick={() => setShowTotalGallery(true)}><span>🖼️</span><span>画廊 ({totalStats.images})</span><span className="menu-arrow">›</span></div><div className="profile-menu-item" onClick={() => bgUploadRef.current?.click()}><span>🎨</span><span>更换背景</span><span className="menu-arrow">›</span></div><input ref={bgUploadRef} type="file" accept="image/*" onChange={handleBgUpload} style={{ display: 'none' }} /><div className="profile-menu-item" onClick={() => setShowSettings(true)}><span>⚙️</span><span>设置</span><span className="menu-arrow">›</span></div><div className="profile-menu-item"><span>💡</span><span>关于一页穹顶</span><span className="menu-arrow">›</span></div></div><div className="profile-bottom-bar"><div className="profile-account-status">{user ? (<div className="logged-in"><span className="sync-indicator" data-status={syncStatus}></span><span>{user.email}</span></div>) : (<button className="login-btn" onClick={() => { setShowAuthModal(true); setAuthMode('login'); }}>登录 / 注册</button>)}</div><div className="profile-version">一页穹顶 v1.0</div></div></div>)}{showTotalGallery && (<div className={`total-gallery-page ${galleryClosing ? "closing" : ""}`}><div className="gallery-header"><button className="gallery-back" onClick={closeGallery}>←</button><h2>画廊</h2><span></span></div><div className="total-gallery-list">{data.books.filter(b => b.gallery?.enabled).map(book => (<div key={book.id} className="total-gallery-book"><div className="total-gallery-book-header" onClick={() => { setCurrentBook(book); setShowTotalGallery(false); closeProfile(); setTimeout(() => setShowGallery(true), 300); }}><span className="book-icon">{book.coverImage ? <img src={book.coverImage} alt="" /> : book.cover}</span><span className="book-title">{book.title}</span><span className="book-count">{book.gallery.images?.length || 0}张</span></div><div className="total-gallery-book-images">{book.gallery.images?.slice(0, 3).map(img => (<div key={img.id} className="total-gallery-thumb" onClick={() => { setCurrentBook(book); setShowTotalGallery(false); closeProfile(); setTimeout(() => setShowGallery(true), 300); }}><img src={img.src} alt="" /></div>))}<label className="total-gallery-add-btn"><input type="file" accept="image/*" multiple onChange={(e) => { const files = e.target.files; if (!files?.length) return; Array.from(files).forEach(file => { const reader = new FileReader(); reader.onload = (ev) => { const newImg = { id: Date.now().toString() + Math.random(), src: ev.target.result, featured: false }; setData(prev => ({ ...prev, books: prev.books.map(b => b.id === book.id ? { ...b, gallery: { ...b.gallery, images: [...(b.gallery.images || []), newImg] } } : b) })); }; reader.readAsDataURL(file); }); e.target.value = ''; }} style={{ display: 'none' }} /><span>+</span></label></div></div>))}{data.books.filter(b => b.gallery?.enabled).length === 0 && (<div className="gallery-empty"><span>🖼️</span><p>还没有任何画廊</p><p>在书籍中开启画廊功能</p></div>)}</div></div>)}{showLibrary && (<div className={`library-page ${libraryClosing ? "closing" : ""}`}><div className="library-header"><button className="library-back" onClick={closeLibrary}>←</button><h2>图书馆</h2><label className="library-import-btn">{importLoading ? '导入中...' : '📥 导入'}<input ref={libraryUploadRef} type="file" accept=".txt,.epub" onChange={handleImportBook} style={{ display: 'none' }} disabled={importLoading} /></label></div><div className="library-hint">支持导入 txt、epub 格式的电子书</div><div className="library-list">{library.books.map(book => (<div key={book.id} className="library-book-item"><div className="library-book-cover">{book.type === 'epub' ? '📕' : '📄'}{book.bookmark && <span className="library-bookmark-badge">🔖</span>}</div><div className="library-book-info" onClick={() => openLibraryBook(book)}><h3>{book.title}</h3><p>{book.author} · {book.chapters.length}章</p><p className="library-book-time">{new Date(book.importTime).toLocaleDateString()}{book.bookmark && ` · 已读至第${book.bookmark.chapterIndex + 1}章`}</p></div><button className="library-book-delete" onClick={(e) => { e.stopPropagation(); handleDeleteLibraryBook(book.id, book.title); }}>🗑️</button></div>))}{library.books.length === 0 && (<div className="library-empty"><span>📚</span><p>图书馆空空如也</p><p>点击右上角导入电子书</p></div>)}</div><ConfirmModal isOpen={confirmModal.isOpen} title={confirmModal.title} message={confirmModal.message} onConfirm={confirmModal.onConfirm} onCancel={() => setConfirmModal({ isOpen: false })} /></div>)}{showLibraryReader && libraryBook && (<StoryReader book={{ title: libraryBook.title }} chapter={libraryBook.chapters[libraryChapterIndex]} novelModeEntry={null} allChapters={libraryBook.chapters} currentChapterIndex={libraryChapterIndex} onClose={() => setShowLibraryReader(false)} onChangeChapter={(ch) => { const idx = libraryBook.chapters.findIndex(c => c.id === ch.id); if (idx >= 0) setLibraryChapterIndex(idx); }} onEdit={() => {}} settings={storySettings} onChangeSettings={setStorySettings} isLibraryMode={true} isBookmarked={libraryBook.bookmark !== null} onToggleBookmark={toggleLibraryBookmark} initialPage={libraryBook.bookmark?.page || 0} />)}<AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} mode={authMode} setMode={setAuthMode} showToast={showToast} />{showRocketModal && (<RocketModal isOpen={showRocketModal} onClose={() => setShowRocketModal(false)} onFly={flyToCoordinate} showToast={showToast} onLaunchStart={() => setLaunchAnimating('up')} />)}<SettingsPage isOpen={showSettings} isClosing={settingsClosing} onClose={closeSettings} user={user} onLogout={async () => { await supabase.auth.signOut(); closeSettings(); }} myInviteCode={myInviteCode} onGenerateCode={generateInviteCode} onResetCode={resetInviteCode} formatCoordinate={formatCoordinate} syncStatus={syncStatus} lastSyncTime={lastSyncTime} onSyncNow={() => { saveToCloud(data); }} showRocketBtn={showRocketBtn} onToggleRocketBtn={toggleRocketBtn} showToast={showToast} />{showReturnConfirm && (<div className="return-confirm-overlay" onClick={() => setShowReturnConfirm(false)}><div className="return-confirm-modal" onClick={e => e.stopPropagation()}><div className="rocket-icon">🚀</div><h3>确认返航？</h3><p>即将返回你自己的书架</p><div className="return-confirm-actions"><button className="stay-btn" onClick={() => setShowReturnConfirm(false)}>再看看</button><button className="go-btn" onClick={confirmReturn}>返航</button></div></div></div>)}{toast.show && <div className="app-toast">{toast.message}</div>}<style>{styles}</style></div>);
+  }}>{pages.map((pageBooks, pageIndex) => (<div key={pageIndex} className="bookshelf-page"><div className="bookshelf-grid">{pageBooks.map((b, bookIndexInPage) => { const globalIndex = pageIndex * booksPerPage + bookIndexInPage; return b.isAddButton ? (<div key="add" className="book-card add-book" onClick={() => { setEditingBook(null); setShowBookModal(true); }}><div className="book-cover"><span className="add-icon">+</span></div><div className="book-meta"><h2>新建世界</h2></div></div>) : (<div key={b.id} className={`book-card ${isBookReorderMode && draggingBookId === b.id ? 'dragging' : ''} ${isBookReorderMode ? 'reorder-mode' : ''}`} style={{ '--book-color': b.color || '#8B7355' }} onClick={() => !isBookReorderMode && handleBookSelect(b)} onTouchStart={e => { e.stopPropagation(); if (!isVisiting && !isBookReorderMode) handleLongPressStart(e, 'book', b); }} onTouchEnd={!isVisiting ? handleLongPressEnd : undefined} onTouchMove={!isVisiting ? handleLongPressEnd : undefined}><div className="book-spine" /><div className="book-cover">{b.coverImage ? <img src={b.coverImage} alt="" className="cover-image" /> : <span className="book-emoji">{b.cover}</span>}</div><div className="book-shadow" /><div className="book-meta"><h2>{b.title}</h2>{b.author && <p>{b.author} 著</p>}</div>{isBookReorderMode && draggingBookId !== b.id && (<div className="book-drop-zone" onClick={(e) => { e.stopPropagation(); handleMoveBook(draggingBookId, globalIndex); }}>放这里</div>)}</div>); })}</div></div>))}</div>{isVisiting && <div className="return-hint">↓ 轻触星球返航 ↓</div>}{totalPages > 1 && (<div className="shelf-page-dots">{pages.map((_, i) => (<span key={i} className={`shelf-dot ${shelfPage === i ? 'active' : ''}`} onClick={() => { shelfRef.current?.scrollTo({ left: i * shelfRef.current.clientWidth, behavior: 'smooth' }); }} />))}</div>)}<BookModal isOpen={showBookModal} onClose={() => { setShowBookModal(false); setEditingBook(null); }} onSave={handleAddBook} editingBook={editingBook} /><ContextMenu isOpen={contextMenu.isOpen} position={contextMenu.position} onClose={() => setContextMenu({ ...contextMenu, isOpen: false })} options={contextMenu.options} /><ConfirmModal isOpen={confirmModal.isOpen} title={confirmModal.title} message={confirmModal.message} onConfirm={confirmModal.onConfirm} onCancel={() => setConfirmModal({ isOpen: false })} /><SearchModal isOpen={showSearch} onClose={() => { setShowSearch(false); setSearchQuery(''); setSearchResults([]); }} query={searchQuery} setQuery={setSearchQuery} results={searchResults} onSearch={performSearch} onResultClick={handleSearchResultClick} />{showProfile && (<div className={`profile-page ${profileClosing ? 'closing' : ''}`} style={userBg ? { backgroundImage: `url(${userBg})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}}><div className="profile-bg-overlay" /><div className="profile-header"><button className="profile-close" onClick={closeProfile}>×</button><div className="profile-avatar" onClick={() => avatarUploadRef.current?.click()}>{userAvatar ? <img src={userAvatar} alt="" /> : '✨'}</div><input ref={avatarUploadRef} type="file" accept="image/*" onChange={handleAvatarUpload} style={{ display: 'none' }} /><input type="text" className="profile-name" value={userName} onChange={e => saveUserName(e.target.value)} placeholder="点击编辑名字" /><input type="text" className="profile-shelf-title" value={userShelfTitle} onChange={e => saveShelfTitle(e.target.value)} placeholder="自定义书架标题（访客可见）" /><textarea className="profile-bio" value={userBio} onChange={e => saveUserBio(e.target.value)} placeholder="写一句简介..." rows={2} /></div><div className="profile-stats"><div className="stat-item"><span className="stat-number">{totalStats.books}</span><span className="stat-label">作品</span></div><div className="stat-item"><span className="stat-number">{totalStats.entries}</span><span className="stat-label">词条</span></div><div className="stat-item"><span className="stat-number">{totalStats.words.toLocaleString()}</span><span className="stat-label">总字数</span></div></div><div className="profile-menu"><div className="profile-menu-item" onClick={closeProfile}><span>📚</span><span>我的书架</span><span className="menu-arrow">›</span></div><div className="profile-menu-item" onClick={() => setShowLibrary(true)}><span>📖</span><span>图书馆 ({library.books.length})</span><span className="menu-arrow">›</span></div><div className="profile-menu-item" onClick={() => setShowTotalGallery(true)}><span>🖼️</span><span>画廊 ({totalStats.images})</span><span className="menu-arrow">›</span></div><div className="profile-menu-item" onClick={() => bgUploadRef.current?.click()}><span>🎨</span><span>更换背景</span><span className="menu-arrow">›</span></div><input ref={bgUploadRef} type="file" accept="image/*" onChange={handleBgUpload} style={{ display: 'none' }} /><div className="profile-menu-item" onClick={() => setShowSettings(true)}><span>⚙️</span><span>设置</span><span className="menu-arrow">›</span></div><div className="profile-menu-item"><span>💡</span><span>关于一页穹顶</span><span className="menu-arrow">›</span></div></div><div className="profile-bottom-bar"><div className="profile-account-status">{user ? (<div className="logged-in"><span className="sync-indicator" data-status={syncStatus}></span><span>{user.email}</span></div>) : (<button className="login-btn" onClick={() => { setShowAuthModal(true); setAuthMode('login'); }}>登录 / 注册</button>)}</div><div className="profile-version">一页穹顶 v1.0</div></div></div>)}{showTotalGallery && (<div className={`total-gallery-page ${galleryClosing ? "closing" : ""}`}><div className="gallery-header"><button className="gallery-back" onClick={closeGallery}>←</button><h2>画廊</h2><span></span></div><div className="total-gallery-list">{data.books.filter(b => b.gallery?.enabled).map(book => (<div key={book.id} className="total-gallery-book"><div className="total-gallery-book-header" onClick={() => { setCurrentBook(book); setShowTotalGallery(false); closeProfile(); setTimeout(() => setShowGallery(true), 300); }}><span className="book-icon">{book.coverImage ? <img src={book.coverImage} alt="" /> : book.cover}</span><span className="book-title">{book.title}</span><span className="book-count">{book.gallery.images?.length || 0}张</span></div><div className="total-gallery-book-images">{book.gallery.images?.slice(0, 3).map(img => (<div key={img.id} className="total-gallery-thumb" onClick={() => { setCurrentBook(book); setShowTotalGallery(false); closeProfile(); setTimeout(() => setShowGallery(true), 300); }}><img src={img.src} alt="" /></div>))}<label className="total-gallery-add-btn"><input type="file" accept="image/*" multiple onChange={(e) => { const files = e.target.files; if (!files?.length) return; Array.from(files).forEach(file => { const reader = new FileReader(); reader.onload = (ev) => { const newImg = { id: Date.now().toString() + Math.random(), src: ev.target.result, featured: false }; setData(prev => ({ ...prev, books: prev.books.map(b => b.id === book.id ? { ...b, gallery: { ...b.gallery, images: [...(b.gallery.images || []), newImg] } } : b) })); }; reader.readAsDataURL(file); }); e.target.value = ''; }} style={{ display: 'none' }} /><span>+</span></label></div></div>))}{data.books.filter(b => b.gallery?.enabled).length === 0 && (<div className="gallery-empty"><span>🖼️</span><p>还没有任何画廊</p><p>在书籍中开启画廊功能</p></div>)}</div></div>)}{showLibrary && (<div className={`library-page ${libraryClosing ? "closing" : ""}`}><div className="library-header"><button className="library-back" onClick={closeLibrary}>←</button><h2>图书馆</h2><label className="library-import-btn">{importLoading ? '导入中...' : '📥 导入'}<input ref={libraryUploadRef} type="file" accept=".txt,.epub" onChange={handleImportBook} style={{ display: 'none' }} disabled={importLoading} /></label></div><div className="library-hint">支持导入 txt、epub 格式的电子书</div><div className="library-list">{library.books.map(book => (<div key={book.id} className="library-book-item"><div className="library-book-cover">{book.type === 'epub' ? '📕' : '📄'}{book.bookmark && <span className="library-bookmark-badge">🔖</span>}</div><div className="library-book-info" onClick={() => openLibraryBook(book)}><h3>{book.title}</h3><p>{book.author} · {book.chapters.length}章</p><p className="library-book-time">{new Date(book.importTime).toLocaleDateString()}{book.bookmark && ` · 已读至第${book.bookmark.chapterIndex + 1}章`}</p></div><button className="library-book-delete" onClick={(e) => { e.stopPropagation(); handleDeleteLibraryBook(book.id, book.title); }}>🗑️</button></div>))}{library.books.length === 0 && (<div className="library-empty"><span>📚</span><p>图书馆空空如也</p><p>点击右上角导入电子书</p></div>)}</div><ConfirmModal isOpen={confirmModal.isOpen} title={confirmModal.title} message={confirmModal.message} onConfirm={confirmModal.onConfirm} onCancel={() => setConfirmModal({ isOpen: false })} /></div>)}{showLibraryReader && libraryBook && (<StoryReader book={{ title: libraryBook.title }} chapter={libraryBook.chapters[libraryChapterIndex]} novelModeEntry={null} allChapters={libraryBook.chapters} currentChapterIndex={libraryChapterIndex} onClose={() => setShowLibraryReader(false)} onChangeChapter={(ch) => { const idx = libraryBook.chapters.findIndex(c => c.id === ch.id); if (idx >= 0) setLibraryChapterIndex(idx); }} onEdit={() => {}} settings={storySettings} onChangeSettings={setStorySettings} isLibraryMode={true} isBookmarked={libraryBook.bookmark !== null} onToggleBookmark={toggleLibraryBookmark} initialPage={libraryBook.bookmark?.page || 0} />)}<AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} mode={authMode} setMode={setAuthMode} showToast={showToast} />{showRocketModal && (<RocketModal isOpen={showRocketModal} onClose={() => setShowRocketModal(false)} onFly={flyToCoordinate} showToast={showToast} onLaunchStart={() => setLaunchAnimating('up')} />)}<SettingsPage isOpen={showSettings} isClosing={settingsClosing} onClose={closeSettings} user={user} onLogout={async () => { await supabase.auth.signOut(); closeSettings(); }} myInviteCode={myInviteCode} onGenerateCode={generateInviteCode} onResetCode={resetInviteCode} formatCoordinate={formatCoordinate} syncStatus={syncStatus} lastSyncTime={lastSyncTime} onSyncNow={() => { saveToCloud(data); }} showRocketBtn={showRocketBtn} onToggleRocketBtn={toggleRocketBtn} showToast={showToast} characterCardStyle={characterCardStyle} onChangeCardStyle={changeCardStyle} />{showReturnConfirm && (<div className="return-confirm-overlay" onClick={() => setShowReturnConfirm(false)}><div className="return-confirm-modal" onClick={e => e.stopPropagation()}><div className="rocket-icon">🚀</div><h3>确认返航？</h3><p>即将返回你自己的书架</p><div className="return-confirm-actions"><button className="stay-btn" onClick={() => setShowReturnConfirm(false)}>再看看</button><button className="go-btn" onClick={confirmReturn}>返航</button></div></div></div>)}{toast.show && <div className="app-toast">{toast.message}</div>}<style>{styles}</style></div>);
 }
 
-  return (<div className="app main-view"><div className={`sidebar ${isSidebarOpen ? 'open' : ''}`}><div className="sidebar-header"><h2>{currentBook.title}</h2><button className="close-sidebar" onClick={() => setIsSidebarOpen(false)}>×</button></div><div className="sidebar-content">{currentBook.entries.map(e => <SidebarItem key={e.id} entry={e} onSelect={handleSidebarSelect} currentId={currentEntry?.id} expandedIds={expandedIds} onToggle={id => setExpandedIds(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; })} />)}</div></div>{isSidebarOpen && <div className="sidebar-overlay" onClick={() => setIsSidebarOpen(false)} />}<div className="main-content" onTouchStart={e => { touchStartX.current = e.touches[0].clientX; }} onTouchEnd={e => { const dx = e.changedTouches[0].clientX - touchStartX.current; if (dx > 80) { if (currentEntry || navigationStack.length > 0) { handleBack(); } else { handleBackToShelf(); } } }}><header className="top-bar"><div className="top-left"><button className="icon-btn" onClick={() => setIsSidebarOpen(true)}>☰</button>{(currentEntry || navigationStack.length > 0) && <button className="icon-btn" onClick={handleBack}>←</button>}<button className="icon-btn" onClick={handleBackToShelf}>🏠</button></div><div className="breadcrumb">{isVisitingInBook && <span className="friend-view-badge">👤 {visitingProfile?.name}</span>}<span className="book-name">{currentBook.title}</span>{currentEntry && <><span className="separator">/</span><span className="current-title">{currentEntry.title}</span></>}</div><div className="top-right">{isVisitingInBook ? (<span className="readonly-indicator">只读</span>) : ((viewMode === 'single' || viewMode === 'merged') && (<div className="read-mode-toggle" onClick={() => { if (!isReadOnly) { const ed = document.querySelector('.rich-editor'); if (ed) ed.forceSave?.(); } else if (viewMode === 'merged' && liveEntry) { initMerged(liveEntry); } setIsReadOnly(!isReadOnly); }}><span className={`toggle-label ${isReadOnly ? 'active' : ''}`}>阅读</span><div className={`toggle-switch ${!isReadOnly ? 'edit-mode' : ''}`}><div className="toggle-knob" /></div><span className={`toggle-label ${!isReadOnly ? 'active' : ''}`}>编辑</span></div>))}</div></header>{!currentEntry && currentBook.showStats && (<div className="book-info-card" onClick={() => { if (!isVisitingInBook) { setEditingBook(currentBook); setShowBookModal(true); } }}><div className="info-cover">{currentBook.coverImage ? <img src={currentBook.coverImage} alt="" /> : <span>{currentBook.cover}</span>}</div><div className="info-details">{currentBook.author && <p>作者：{currentBook.author}</p>}{currentBook.tags?.length > 0 && <p>标签：{currentBook.tags.join('、')}</p>}<p>词条：{countEntries(currentBook.entries)}条</p><p>字数：{countWords(currentBook.entries).toLocaleString()}字</p></div>{!isVisitingInBook && <span className="info-edit-hint">点击编辑 ›</span>}</div>)}{!currentEntry && currentBook.gallery?.enabled && (<div className="gallery-preview-strip"><div className="gallery-preview-scroll">{currentBook.gallery.images?.filter(img => img.featured).map(img => (<div key={img.id} className="gallery-strip-item" onClick={() => openGalleryPreview(img)}><img src={img.src} alt="" /></div>))}{(!currentBook.gallery.images?.filter(img => img.featured).length) && !isVisitingInBook && (<div className="gallery-strip-empty" onClick={() => setShowGallery(true)}><span>+</span><p>添加展示图片</p></div>)}</div><button className="gallery-enter-btn" onClick={() => setShowGallery(true)}>进入画廊 ›</button></div>)}<main className={`content-area ${slideAnim}`}>{viewMode === 'list' && !isReorderMode && (<>{currentEntry && <div className="list-header"><h1>{currentEntry.title}</h1>{currentEntry.summary && <p className="summary">{currentEntry.summary}</p>}</div>}<p className="swipe-hint">{isVisitingInBook ? '💡 左滑合并视图 · 右滑返回' : '💡 左滑合并视图 · 右滑返回 · 长按编辑'}</p><div className="entry-list">{currentEntries.map(e => { let tx = 0; return (<div key={e.id} className="entry-card" onClick={() => handleEntryClick(e)} onTouchStart={ev => { tx = ev.touches[0].clientX; if (!isVisitingInBook) handleLongPressStart(ev, 'entry', e); }} onTouchMove={!isVisitingInBook ? handleLongPressEnd : undefined} onTouchEnd={ev => { if (!isVisitingInBook) handleLongPressEnd(); handleEntrySwipe(e, ev.changedTouches[0].clientX - tx); }}><div className="entry-icon">{e.novelMode ? '📖' : e.isFolder ? '📁' : '📄'}</div><div className="entry-info"><h3>{e.title}{e.linkable && <span className="star-badge">⭐</span>}{e.novelMode && <span className="novel-badge">正文</span>}</h3><p>{e.summary}</p></div><span className="entry-arrow">›</span></div>); })}</div>{currentEntries.length === 0 && <div className="empty-state"><span>✨</span><p>{isVisitingInBook ? '这里还没有内容' : '点击右下角添加'}</p></div>}</>)}{viewMode === 'list' && isReorderMode && <ReorderList entries={currentEntries} onReorder={handleReorder} onExit={() => setIsReorderMode(false)} />}{viewMode === 'single' && liveEntry && (<div className="single-view"><div className="export-content" ref={exportRef}><div className="content-header">{effectiveReadOnly ? <h1>{liveEntry.title}</h1> : <input type="text" className="editable-title" defaultValue={liveEntry.title} onBlur={ev => handleTitleChange(liveEntry.id, liveEntry.title, ev.target.value)} key={currentEntry.id + '-title'} />}{effectiveReadOnly ? (liveEntry.summary && <p className="entry-summary">{liveEntry.summary}</p>) : <input type="text" className="editable-summary" defaultValue={liveEntry.summary || ''} placeholder="添加简介..." onBlur={ev => handleSummaryChange(liveEntry.id, ev.target.value)} key={currentEntry.id + '-summary'} />}</div><div onTouchStart={effectiveReadOnly ? handleContentLongPressStart : undefined} onTouchEnd={effectiveReadOnly ? handleContentLongPressEnd : undefined} onTouchMove={effectiveReadOnly ? handleContentLongPressEnd : undefined}>{effectiveReadOnly ? <ContentRenderer content={liveEntry.content} allTitlesMap={allTitlesMap} currentBookId={currentBook.id} onLinkClick={handleLinkClick} fontFamily={currentFont} /> : <RichEditor key={currentEntry.id} content={liveEntry.content} onSave={html => saveContent(html)} fontFamily={currentFont} onImageClick={handleImageClick} onResetFormats={() => setActiveFormats({ bold: false, italic: false, underline: false, strike: false, size: 'medium' })} />}</div></div><div className="word-count">{countSingleEntryWords(liveEntry.content).toLocaleString()} 字</div></div>)}{viewMode === 'merged' && currentEntry && (<div className="merged-view">{effectiveReadOnly ? (<div ref={exportRef}><div className="content-header merged-header"><h1>{currentEntry.title}</h1><p className="merged-hint">📖 合并视图</p></div><div className="merged-content-read" onTouchStart={handleContentLongPressStart} onTouchEnd={handleContentLongPressEnd} onTouchMove={handleContentLongPressEnd}>{liveChildContent.map((it, i, arr) => (<div key={it.id} className="merged-section"><div className="section-title">• {it.title}</div><ContentRenderer content={it.content} allTitlesMap={allTitlesMap} currentBookId={currentBook.id} onLinkClick={handleLinkClick} fontFamily={currentFont} />{i < arr.length - 1 && <div className="section-divider" />}</div>))}</div></div>) : (<><div className="content-header merged-header"><h1>{currentEntry.title}</h1><p className="merged-hint">📖 合并视图</p></div><div className="merged-content-edit">{mergedContents.map((it, i) => (<div key={it.id} className="merged-edit-section"><div className="merged-edit-header">• <input type="text" className="merged-title-input" defaultValue={it.title} onBlur={ev => handleMergedChange(i, 'title', ev.target.value)} key={it.id + '-title'} /></div><div className="merged-editor-wrap" contentEditable dangerouslySetInnerHTML={{ __html: it.content }} onBlur={ev => handleMergedChange(i, 'content', ev.target.innerHTML)} onPaste={ev => { ev.preventDefault(); const text = ev.clipboardData.getData('text/plain'); document.execCommand('insertText', false, text); }} style={{ fontFamily: currentFont }} /></div>))}<button className="add-merged-entry-btn" onClick={handleAddMerged}>+ 添加词条</button></div></>)}<div className="word-count">{liveChildContent.reduce((sum, it) => sum + countSingleEntryWords(it.content), 0).toLocaleString()} 字</div></div>)}{viewMode === 'novel' && liveEntry && (
+  return (<div className="app main-view"><div className={`sidebar ${isSidebarOpen ? 'open' : ''}`}><div className="sidebar-header"><h2>{currentBook.title}</h2><button className="close-sidebar" onClick={() => setIsSidebarOpen(false)}>×</button></div><div className="sidebar-content">{currentBook.entries.map(e => <SidebarItem key={e.id} entry={e} onSelect={handleSidebarSelect} currentId={currentEntry?.id} expandedIds={expandedIds} onToggle={id => setExpandedIds(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; })} />)}</div></div>{isSidebarOpen && <div className="sidebar-overlay" onClick={() => setIsSidebarOpen(false)} />}<div className="main-content" onTouchStart={e => { touchStartX.current = e.touches[0].clientX; touchStartY.current = e.touches[0].clientY; }} onTouchEnd={e => { const dx = e.changedTouches[0].clientX - touchStartX.current; const dy = e.changedTouches[0].clientY - touchStartY.current; if (dx > 120 && Math.abs(dx) > Math.abs(dy) * 2) { if (currentEntry || navigationStack.length > 0) { handleBack(); } else { handleBackToShelf(); } } }}><header className="top-bar"><div className="top-left"><button className="icon-btn" onClick={() => setIsSidebarOpen(true)}>☰</button>{(currentEntry || navigationStack.length > 0) && <button className="icon-btn" onClick={handleBack}>←</button>}<button className="icon-btn" onClick={handleBackToShelf}>🏠</button></div><div className="breadcrumb">{isVisitingInBook && <span className="friend-view-badge">👤 {visitingProfile?.name}</span>}<span className="book-name">{currentBook.title}</span>{currentEntry && <><span className="separator">/</span><span className="current-title">{currentEntry.title}</span></>}</div><div className="top-right">{isVisitingInBook ? (<span className="readonly-indicator">只读</span>) : ((viewMode === 'single' || viewMode === 'merged') && (<div className="read-mode-toggle" onClick={() => { if (!isReadOnly) { const ed = document.querySelector('.rich-editor'); if (ed) ed.forceSave?.(); } else if (viewMode === 'merged' && liveEntry) { initMerged(liveEntry); } setIsReadOnly(!isReadOnly); }}><span className={`toggle-label ${isReadOnly ? 'active' : ''}`}>阅读</span><div className={`toggle-switch ${!isReadOnly ? 'edit-mode' : ''}`}><div className="toggle-knob" /></div><span className={`toggle-label ${!isReadOnly ? 'active' : ''}`}>编辑</span></div>))}</div></header>{!currentEntry && currentBook.showStats && (<div className="book-info-card" onClick={() => { if (!isVisitingInBook) { setEditingBook(currentBook); setShowBookModal(true); } }}><div className="info-cover">{currentBook.coverImage ? <img src={currentBook.coverImage} alt="" /> : <span>{currentBook.cover}</span>}</div><div className="info-details">{currentBook.author && <p>作者：{currentBook.author}</p>}{currentBook.tags?.length > 0 && <p>标签：{currentBook.tags.join('、')}</p>}<p>词条：{countEntries(currentBook.entries)}条</p><p>字数：{countWords(currentBook.entries).toLocaleString()}字</p></div>{!isVisitingInBook && <span className="info-edit-hint">点击编辑 ›</span>}</div>)}{!currentEntry && currentBook.gallery?.enabled && (<div className="gallery-preview-strip"><div className="gallery-preview-scroll">{currentBook.gallery.images?.filter(img => img.featured).map(img => (<div key={img.id} className="gallery-strip-item" onClick={() => openGalleryPreview(img)}><img src={img.src} alt="" /></div>))}{(!currentBook.gallery.images?.filter(img => img.featured).length) && !isVisitingInBook && (<div className="gallery-strip-empty" onClick={() => setShowGallery(true)}><span>+</span><p>添加展示图片</p></div>)}</div><button className="gallery-enter-btn" onClick={() => setShowGallery(true)}>进入画廊 ›</button></div>)}<main className={`content-area ${slideAnim}`}>{viewMode === 'list' && !isReorderMode && (<>{currentEntry && <div className="list-header"><h1>{currentEntry.title}</h1>{currentEntry.summary && <p className="summary">{currentEntry.summary}</p>}</div>}<p className="swipe-hint">{isVisitingInBook ? '💡 左滑合并视图 · 右滑返回' : '💡 左滑合并视图 · 右滑返回 · 长按编辑'}</p><div className="entry-list">{currentEntries.map(e => { let tx = 0; return (<div key={e.id} className="entry-card" onClick={() => handleEntryClick(e)} onTouchStart={ev => { tx = ev.touches[0].clientX; if (!isVisitingInBook) handleLongPressStart(ev, 'entry', e); }} onTouchMove={!isVisitingInBook ? handleLongPressEnd : undefined} onTouchEnd={ev => { if (!isVisitingInBook) handleLongPressEnd(); handleEntrySwipe(e, ev.changedTouches[0].clientX - tx); }}><div className="entry-icon">{e.characterMode ? '👤' : e.novelMode ? '📖' : e.isFolder ? '📁' : '📄'}</div><div className="entry-info"><h3>{e.title}{e.linkable && <span className="star-badge">⭐</span>}{e.novelMode && <span className="novel-badge">正文</span>}{e.characterMode && <span className="character-badge">人设</span>}</h3><p>{e.summary}</p></div><span className="entry-arrow">›</span></div>); })}</div>{currentEntries.length === 0 && <div className="empty-state"><span>✨</span><p>{isVisitingInBook ? '这里还没有内容' : '点击右下角添加'}</p></div>}</>)}{(viewMode === 'list' || viewMode === 'character') && isReorderMode && <ReorderList entries={currentEntries} onReorder={handleReorder} onExit={() => setIsReorderMode(false)} />}{viewMode === 'single' && liveEntry && (<div className="single-view"><div className="export-content" ref={exportRef}><div className="content-header">{effectiveReadOnly ? <h1>{liveEntry.title}</h1> : <input type="text" className="editable-title" defaultValue={liveEntry.title} onBlur={ev => handleTitleChange(liveEntry.id, liveEntry.title, ev.target.value)} key={currentEntry.id + '-title'} />}{effectiveReadOnly ? (liveEntry.summary && <p className="entry-summary">{liveEntry.summary}</p>) : <input type="text" className="editable-summary" defaultValue={liveEntry.summary || ''} placeholder="添加简介..." onBlur={ev => handleSummaryChange(liveEntry.id, ev.target.value)} key={currentEntry.id + '-summary'} />}</div><div onTouchStart={effectiveReadOnly ? handleContentLongPressStart : undefined} onTouchEnd={effectiveReadOnly ? handleContentLongPressEnd : undefined} onTouchMove={effectiveReadOnly ? handleContentLongPressEnd : undefined}>{effectiveReadOnly ? <ContentRenderer content={liveEntry.content} allTitlesMap={allTitlesMap} currentBookId={currentBook.id} onLinkClick={handleLinkClick} fontFamily={currentFont} /> : <RichEditor key={currentEntry.id} content={liveEntry.content} onSave={html => saveContent(html)} fontFamily={currentFont} onImageClick={handleImageClick} onResetFormats={() => setActiveFormats({ bold: false, italic: false, underline: false, strike: false, size: 'medium' })} />}</div></div><div className="word-count">{countSingleEntryWords(liveEntry.content).toLocaleString()} 字</div></div>)}{viewMode === 'merged' && currentEntry && (<div className="merged-view">{effectiveReadOnly ? (<div ref={exportRef}><div className="content-header merged-header"><h1>{currentEntry.title}</h1><p className="merged-hint">📖 合并视图</p></div><div className="merged-content-read" onTouchStart={handleContentLongPressStart} onTouchEnd={handleContentLongPressEnd} onTouchMove={handleContentLongPressEnd}>{liveChildContent.map((it, i, arr) => (<div key={it.id} className="merged-section"><div className="section-title">• {it.title}</div><ContentRenderer content={it.content} allTitlesMap={allTitlesMap} currentBookId={currentBook.id} onLinkClick={handleLinkClick} fontFamily={currentFont} />{i < arr.length - 1 && <div className="section-divider" />}</div>))}</div></div>) : (<><div className="content-header merged-header"><h1>{currentEntry.title}</h1><p className="merged-hint">📖 合并视图</p></div><div className="merged-content-edit">{mergedContents.map((it, i) => (<div key={it.id} className="merged-edit-section"><div className="merged-edit-header">• <input type="text" className="merged-title-input" defaultValue={it.title} onBlur={ev => handleMergedChange(i, 'title', ev.target.value)} key={it.id + '-title'} /></div><div className="merged-editor-wrap" contentEditable dangerouslySetInnerHTML={{ __html: it.content }} onBlur={ev => handleMergedChange(i, 'content', ev.target.innerHTML)} onPaste={ev => { ev.preventDefault(); const text = ev.clipboardData.getData('text/plain'); document.execCommand('insertText', false, text); }} style={{ fontFamily: currentFont }} /></div>))}<button className="add-merged-entry-btn" onClick={handleAddMerged}>+ 添加词条</button></div></>)}<div className="word-count">{liveChildContent.reduce((sum, it) => sum + countSingleEntryWords(it.content), 0).toLocaleString()} 字</div></div>)}{viewMode === 'character' && currentEntry && !isReorderMode && (<div className="character-view"><div className="character-header"><h1>{currentEntry.title}</h1><p className="character-hint">👤 人设模式 · {currentEntry.children?.length || 0} 位角色</p></div><div className="character-grid">{(currentEntry.children || []).map((char, idx) => (<CharacterCard key={char.id} entry={char} style={characterCardStyle} onClick={handleCharacterClick} onLongPress={!isVisitingInBook ? handleCharacterLongPress : undefined} index={idx} />))}{!isVisitingInBook && <AddCharacterCard style={characterCardStyle} onClick={() => { setEditingCharacter(null); setShowCharacterModal(true); }} />}</div>{currentEntry.children?.length === 0 && <div className="empty-state"><span>👤</span><p>还没有人设</p><p>点击「+」添加角色</p></div>}</div>)}{viewMode === 'novel' && liveEntry && (
   <NovelTocView 
     entry={liveEntry}
     onSelectChapter={(ch, parentVolId) => { 
@@ -3321,7 +4385,7 @@ export default function App() {
     collapsedVolumes={novelCollapsedVolumes}
     allEntries={currentBook.entries}
   />
-)}</main>{viewMode === 'list' && !isReorderMode && !isVisitingInBook && (<><button className={`fab ${showAddMenu ? 'active' : ''}`} onClick={() => setShowAddMenu(!showAddMenu)}><span style={{ transform: showAddMenu ? 'rotate(45deg)' : 'none', transition: 'transform 0.2s' }}>+</span></button><AddMenu isOpen={showAddMenu} onClose={() => setShowAddMenu(false)} onAddEntry={() => { setEditingEntry(null); setIsCreatingFolder(false); setShowEntryModal(true); }} onAddFolder={() => { setEditingEntry(null); setIsCreatingFolder(true); setShowEntryModal(true); }} onReorder={() => setIsReorderMode(true)} onToggleGallery={toggleGallery} galleryEnabled={currentBook?.gallery?.enabled} /></>)}{isEditing && <EditorToolbar onIndent={handleIndent} onFormat={() => { saveSelection(); setShowFormatMenu(true); }} onAlign={() => { saveSelection(); setShowAlignMenu(true); }} onFont={() => { saveSelection(); setShowFontMenu(true); }} onImage={handleImageUpload} hasActive={hasActiveFormat} />}<TextFormatMenu isOpen={showFormatMenu} onClose={() => { setShowFormatMenu(false); }} activeFormats={activeFormats} onToggleFormat={handleToggleFormat} /><AlignMenu isOpen={showAlignMenu} onClose={() => { setShowAlignMenu(false); restoreSelection(); }} onAlign={handleAlign} /><FontMenu isOpen={showFontMenu} onClose={() => { setShowFontMenu(false); restoreSelection(); }} onSelectFont={setCurrentFont} currentFont={currentFont} /></div><EntryModal isOpen={showEntryModal} onClose={() => { setShowEntryModal(false); setEditingEntry(null); }} onSave={editingEntry ? handleUpdateEntry : handleAddEntry} editingEntry={editingEntry} parentTitle={currentEntry?.title} isFolder={isCreatingFolder} /><ContextMenu isOpen={contextMenu.isOpen} position={contextMenu.position} onClose={() => setContextMenu({ ...contextMenu, isOpen: false })} options={contextMenu.options} /><ConfirmModal isOpen={confirmModal.isOpen} title={confirmModal.title} message={confirmModal.message} onConfirm={confirmModal.onConfirm} onCancel={() => setConfirmModal({ isOpen: false })} />{showGallery && (<div className="gallery-page" onClick={e => e.stopPropagation()}><div className="gallery-header"><button className="gallery-back" onClick={() => { setShowGallery(false); setGalleryContextMenu({ isOpen: false, image: null, position: { x: 0, y: 0 } }); }}>←</button><h2>{currentBook?.title}</h2><button className="gallery-upload" onClick={() => galleryUploadRef.current?.click()}>+ 添加</button><input ref={galleryUploadRef} type="file" accept="image/*" multiple onChange={uploadGalleryImage} style={{ display: 'none' }} /></div><div className="gallery-grid">{currentBook?.gallery?.images?.map(img => (<div key={img.id} className="gallery-item" onTouchStart={(e) => { e.stopPropagation(); const touch = e.touches[0]; galleryLongPressTimer.current = setTimeout(() => { if (navigator.vibrate) navigator.vibrate(30); setGalleryContextMenu({ isOpen: true, image: img, position: { x: touch.clientX, y: touch.clientY } }); }, 500); }} onTouchEnd={(e) => { e.stopPropagation(); if (galleryLongPressTimer.current) { clearTimeout(galleryLongPressTimer.current); galleryLongPressTimer.current = null; } }} onTouchMove={(e) => { if (galleryLongPressTimer.current) { clearTimeout(galleryLongPressTimer.current); galleryLongPressTimer.current = null; } }} onClick={(e) => { e.stopPropagation(); if (!galleryContextMenu.isOpen) openGalleryPreview(img); }}><img src={img.src} alt="" draggable={false} />{img.featured && <span className="featured-star">★</span>}</div>))}{(!currentBook?.gallery?.images || currentBook.gallery.images.length === 0) && (<div className="gallery-empty"><span>🖼️</span><p>还没有图片</p><p>点击右上角添加</p></div>)}</div>{galleryContextMenu.isOpen && (<><div className="gallery-context-overlay" onClick={(e) => { e.stopPropagation(); setGalleryContextMenu({ isOpen: false, image: null, position: { x: 0, y: 0 } }); }} /><div className="context-menu" style={{ top: galleryContextMenu.position.y, left: Math.min(galleryContextMenu.position.x, window.innerWidth - 180) }}><div className="context-item" onClick={(e) => { e.stopPropagation(); toggleFeatured(galleryContextMenu.image.id); }}><span className="context-icon">{galleryContextMenu.image.featured ? '☆' : '★'}</span>{galleryContextMenu.image.featured ? '取消展示' : '展示'}</div><div className="context-item danger" onClick={(e) => { e.stopPropagation(); deleteGalleryImage(galleryContextMenu.image.id); }}><span className="context-icon">🗑️</span>删除图片</div></div></>)}{galleryConfirmModal.isOpen && (<div className="gallery-confirm-overlay" onClick={(e) => { e.stopPropagation(); setGalleryConfirmModal({ isOpen: false }); }}><div className="modal-content confirm-modal" onClick={e => e.stopPropagation()}><h3>{galleryConfirmModal.title}</h3><p>{galleryConfirmModal.message}</p><div className="modal-actions"><button className="btn-cancel" onClick={() => setGalleryConfirmModal({ isOpen: false })}>取消</button><button className="btn-save" onClick={galleryConfirmModal.onConfirm}>确定</button></div></div></div>)}</div>)}{galleryPreviewImage && (<div className="gallery-viewer" onTouchStart={(e) => {
+)}</main>{viewMode === 'list' && !isReorderMode && !isVisitingInBook && (<><button className={`fab ${showAddMenu ? 'active' : ''}`} onClick={() => setShowAddMenu(!showAddMenu)}><span style={{ transform: showAddMenu ? 'rotate(45deg)' : 'none', transition: 'transform 0.2s' }}>+</span></button><AddMenu isOpen={showAddMenu} onClose={() => setShowAddMenu(false)} onAddEntry={() => { setEditingEntry(null); setIsCreatingFolder(false); setShowEntryModal(true); }} onAddFolder={() => { setEditingEntry(null); setIsCreatingFolder(true); setShowEntryModal(true); }} onReorder={() => setIsReorderMode(true)} onToggleGallery={toggleGallery} galleryEnabled={currentBook?.gallery?.enabled} /></>)}{viewMode === 'character' && !isVisitingInBook && (<><button className={`fab ${showCharacterAddMenu ? 'active' : ''}`} onClick={() => setShowCharacterAddMenu(!showCharacterAddMenu)}><span style={{ transform: showCharacterAddMenu ? 'rotate(45deg)' : 'none', transition: 'transform 0.2s' }}>+</span></button><CharacterAddMenu isOpen={showCharacterAddMenu} onClose={() => setShowCharacterAddMenu(false)} onAddCharacter={() => { setEditingCharacter(null); setShowCharacterModal(true); }} onOpenRelationNetwork={() => setShowRelationNetwork(true)} onReorder={() => setIsReorderMode(true)} /></>)}{isEditing && <EditorToolbar onIndent={handleIndent} onFormat={() => { saveSelection(); setShowFormatMenu(true); }} onAlign={() => { saveSelection(); setShowAlignMenu(true); }} onFont={() => { saveSelection(); setShowFontMenu(true); }} onImage={handleImageUpload} hasActive={hasActiveFormat} />}<TextFormatMenu isOpen={showFormatMenu} onClose={() => { setShowFormatMenu(false); }} activeFormats={activeFormats} onToggleFormat={handleToggleFormat} /><AlignMenu isOpen={showAlignMenu} onClose={() => { setShowAlignMenu(false); restoreSelection(); }} onAlign={handleAlign} /><FontMenu isOpen={showFontMenu} onClose={() => { setShowFontMenu(false); restoreSelection(); }} onSelectFont={setCurrentFont} currentFont={currentFont} /></div><EntryModal isOpen={showEntryModal} onClose={() => { setShowEntryModal(false); setEditingEntry(null); }} onSave={editingEntry ? handleUpdateEntry : handleAddEntry} editingEntry={editingEntry} parentTitle={currentEntry?.title} isFolder={isCreatingFolder} /><ContextMenu isOpen={contextMenu.isOpen} position={contextMenu.position} onClose={() => setContextMenu({ ...contextMenu, isOpen: false })} options={contextMenu.options} /><MoveModal isOpen={showMoveModal} onClose={() => { setShowMoveModal(false); setMoveTarget(null); }} entry={moveTarget} entries={currentBook?.entries || []} currentParentId={currentEntry?.id || null} onMove={handleMoveEntry} /><ConfirmModal isOpen={confirmModal.isOpen} title={confirmModal.title} message={confirmModal.message} onConfirm={confirmModal.onConfirm} onCancel={() => setConfirmModal({ isOpen: false })} />{showGallery && (<div className="gallery-page" onClick={e => e.stopPropagation()}><div className="gallery-header"><button className="gallery-back" onClick={() => { setShowGallery(false); setGalleryContextMenu({ isOpen: false, image: null, position: { x: 0, y: 0 } }); }}>←</button><h2>{currentBook?.title}</h2><button className="gallery-upload" onClick={() => galleryUploadRef.current?.click()}>+ 添加</button><input ref={galleryUploadRef} type="file" accept="image/*" multiple onChange={uploadGalleryImage} style={{ display: 'none' }} /></div><div className="gallery-grid">{currentBook?.gallery?.images?.map(img => (<div key={img.id} className="gallery-item" onTouchStart={(e) => { e.stopPropagation(); const touch = e.touches[0]; galleryLongPressTimer.current = setTimeout(() => { if (navigator.vibrate) navigator.vibrate(30); setGalleryContextMenu({ isOpen: true, image: img, position: { x: touch.clientX, y: touch.clientY } }); }, 500); }} onTouchEnd={(e) => { e.stopPropagation(); if (galleryLongPressTimer.current) { clearTimeout(galleryLongPressTimer.current); galleryLongPressTimer.current = null; } }} onTouchMove={(e) => { if (galleryLongPressTimer.current) { clearTimeout(galleryLongPressTimer.current); galleryLongPressTimer.current = null; } }} onClick={(e) => { e.stopPropagation(); if (!galleryContextMenu.isOpen) openGalleryPreview(img); }}><img src={img.src} alt="" draggable={false} />{img.featured && <span className="featured-star">★</span>}</div>))}{(!currentBook?.gallery?.images || currentBook.gallery.images.length === 0) && (<div className="gallery-empty"><span>🖼️</span><p>还没有图片</p><p>点击右上角添加</p></div>)}</div>{galleryContextMenu.isOpen && (<><div className="gallery-context-overlay" onClick={(e) => { e.stopPropagation(); setGalleryContextMenu({ isOpen: false, image: null, position: { x: 0, y: 0 } }); }} /><div className="context-menu" style={{ top: galleryContextMenu.position.y, left: Math.min(galleryContextMenu.position.x, window.innerWidth - 180) }}><div className="context-item" onClick={(e) => { e.stopPropagation(); toggleFeatured(galleryContextMenu.image.id); }}><span className="context-icon">{galleryContextMenu.image.featured ? '☆' : '★'}</span>{galleryContextMenu.image.featured ? '取消展示' : '展示'}</div><div className="context-item danger" onClick={(e) => { e.stopPropagation(); deleteGalleryImage(galleryContextMenu.image.id); }}><span className="context-icon">🗑️</span>删除图片</div></div></>)}{galleryConfirmModal.isOpen && (<div className="gallery-confirm-overlay" onClick={(e) => { e.stopPropagation(); setGalleryConfirmModal({ isOpen: false }); }}><div className="modal-content confirm-modal" onClick={e => e.stopPropagation()}><h3>{galleryConfirmModal.title}</h3><p>{galleryConfirmModal.message}</p><div className="modal-actions"><button className="btn-cancel" onClick={() => setGalleryConfirmModal({ isOpen: false })}>取消</button><button className="btn-save" onClick={galleryConfirmModal.onConfirm}>确定</button></div></div></div>)}</div>)}{galleryPreviewImage && (<div className="gallery-viewer" onTouchStart={(e) => {
   e.stopPropagation();
   if (e.touches.length === 2) {
     const dx = e.touches[0].clientX - e.touches[1].clientX;
@@ -3441,7 +4505,7 @@ export default function App() {
   onSave={handleSaveStoryEdit}
   editingItem={storyEditItem}
   type={storyEditType}
-/>{toast.show && <div className="app-toast">{toast.message}</div>}<style>{styles}</style></div>);
+/><CharacterEditModal isOpen={showCharacterModal} onClose={() => { setShowCharacterModal(false); setEditingCharacter(null); }} onSave={editingCharacter ? handleUpdateCharacter : handleAddCharacter} editingEntry={editingCharacter} /><RelationNetworkPage isOpen={showRelationNetwork} onClose={() => setShowRelationNetwork(false)} entries={currentEntry?.children || []} relations={currentEntry?.characterRelations || []} onAddRelation={handleAddRelation} onDeleteRelation={handleDeleteRelation} onUpdateRelation={handleUpdateRelation} bookTitle={currentEntry?.title || ''} cardStyle={characterCardStyle} />{showCharacterDetail && (<CharacterDetailPage entry={showCharacterDetail} onClose={() => setShowCharacterDetail(null)} onSave={(updatedEntry) => { setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, updatedEntry.id, { content: updatedEntry.content }) } : b) })); setShowCharacterDetail({ ...showCharacterDetail, content: updatedEntry.content }); }} isReadOnly={!!visitingBookshelf} cardStyle={characterCardStyle} allTitlesMap={allTitlesMap} onLinkClick={(kw, bookId, entryId) => { setShowCharacterDetail(null); handleLinkClick(kw, bookId, entryId); }} bookName={currentBook?.title} />)}{toast.show && <div className="app-toast">{toast.message}</div>}<style>{styles}</style></div>);
 }
 
 const styles = `
@@ -3497,7 +4561,7 @@ html,body,#root{height:100%;overflow:hidden}
 .sidebar-icon{font-size:.85rem}
 .sidebar-title{font-size:.9rem;flex:1}
 .link-star{font-size:.65rem;opacity:.7}
-.top-bar{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:rgba(250,248,243,.95);backdrop-filter:blur(10px);border-bottom:1px solid rgba(45,48,71,.1)}
+.top-bar{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:12px 16px;padding-top:calc(12px + env(safe-area-inset-top));background:rgba(250,248,243,.95);backdrop-filter:blur(10px);border-bottom:1px solid rgba(45,48,71,.1)}
 .top-left{display:flex;gap:4px}
 .icon-btn{background:none;border:none;font-size:1.2rem;padding:8px;border-radius:8px;cursor:pointer;color:#2D3047}
 .icon-btn:active{background:rgba(45,48,71,.1)}
@@ -3566,19 +4630,19 @@ html,body,#root{height:100%;overflow:hidden}
 .merged-editor-wrap{min-height:80px;line-height:1.8;font-size:16px;outline:none;color:#333}
 .merged-editor-wrap:empty:before{content:'内容...';color:#999}
 .add-merged-entry-btn{background:none;border:1px dashed rgba(45,48,71,.2);border-radius:8px;padding:12px;color:#8B7355;font-size:.9rem;cursor:pointer}
-.fab{position:fixed;right:24px;bottom:24px;width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#2D3047,#1a1a2e);border:none;color:#f4e4c1;font-size:1.8rem;cursor:pointer;box-shadow:0 4px 20px rgba(45,48,71,.4);display:flex;align-items:center;justify-content:center;z-index:50}
+.fab{position:fixed;right:24px;bottom:calc(24px + env(safe-area-inset-bottom));width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#2D3047,#1a1a2e);border:none;color:#f4e4c1;font-size:1.8rem;cursor:pointer;box-shadow:0 4px 20px rgba(45,48,71,.4);display:flex;align-items:center;justify-content:center;z-index:50}
 .fab:active,.fab.active{transform:scale(.9)}
 .add-menu-overlay{position:fixed;inset:0;z-index:48}
-.add-menu{position:fixed;right:24px;bottom:90px;background:#fff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.15);overflow:hidden;z-index:49}
+.add-menu{position:fixed;right:24px;bottom:calc(90px + env(safe-area-inset-bottom));background:#fff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.15);overflow:hidden;z-index:49}
 .add-menu-item{display:flex;align-items:center;gap:12px;padding:16px 20px;cursor:pointer}
 .add-menu-item:active{background:#f5f5f5}
 .add-menu-item:not(:last-child){border-bottom:1px solid #eee}
-.editor-toolbar-bottom{position:fixed;bottom:0;left:0;right:0;display:flex;justify-content:space-around;padding:8px 16px;background:rgba(250,248,243,.98);border-top:1px solid rgba(45,48,71,.08);z-index:50}
+.editor-toolbar-bottom{position:fixed;bottom:0;left:0;right:0;display:flex;justify-content:space-around;padding:8px 16px;padding-bottom:calc(8px + env(safe-area-inset-bottom));background:rgba(250,248,243,.98);border-top:1px solid rgba(45,48,71,.08);z-index:50}
 .editor-toolbar-bottom button{background:none;border:none;font-size:1rem;padding:8px 14px;cursor:pointer;color:#2D3047;border-radius:6px;display:flex;align-items:center;justify-content:center}
 .editor-toolbar-bottom button:active{background:rgba(45,48,71,.08)}
 .editor-toolbar-bottom button.has-active{color:#8B7355;background:rgba(139,115,85,.1)}
 .format-menu-overlay{position:fixed;inset:0;z-index:58}
-.format-menu{position:fixed;left:16px;right:16px;bottom:60px;background:#fff;border-radius:12px;box-shadow:0 -4px 20px rgba(0,0,0,.1);z-index:59;padding:12px}
+.format-menu{position:fixed;left:16px;right:16px;bottom:calc(60px + env(safe-area-inset-bottom));background:#fff;border-radius:12px;box-shadow:0 -4px 20px rgba(0,0,0,.1);z-index:59;padding:12px}
 .format-hint{font-size:.75rem;color:#999;text-align:center;margin-bottom:10px}
 .format-row{display:flex;justify-content:space-around;margin-bottom:8px}
 .format-row:last-child{margin-bottom:0}
@@ -3587,7 +4651,7 @@ html,body,#root{height:100%;overflow:hidden}
 .format-row button.active{background:#8B7355;color:#fff;border-color:#8B7355}
 .size-row button{width:auto;padding:0 14px}
 .align-menu .format-row{justify-content:center;gap:16px}
-.font-menu{position:fixed;left:16px;right:16px;bottom:60px;background:#fff;border-radius:12px;box-shadow:0 -4px 20px rgba(0,0,0,.1);z-index:59;padding:16px;display:flex;flex-wrap:wrap;gap:8px}
+.font-menu{position:fixed;left:16px;right:16px;bottom:calc(60px + env(safe-area-inset-bottom));background:#fff;border-radius:12px;box-shadow:0 -4px 20px rgba(0,0,0,.1);z-index:59;padding:16px;display:flex;flex-wrap:wrap;gap:8px}
 .font-item{padding:10px 14px;border-radius:8px;cursor:pointer;font-size:.9rem;background:#f5f5f5}
 .font-item.active{background:rgba(139,115,85,.15);color:#8B7355}
 .reorder-mode{padding:0}
@@ -3602,6 +4666,26 @@ html,body,#root{height:100%;overflow:hidden}
 .bookmark-tab{width:40px;height:100%;background:linear-gradient(135deg,#8B7355,#6B5335);display:flex;align-items:center;justify-content:center;color:#f4e4c1;font-size:1.2rem;clip-path:polygon(0 0,100% 0,100% 100%,0 100%,8px 50%)}
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px}
 .modal-content{background:#fff;border-radius:16px;padding:24px;width:100%;max-width:360px;max-height:80vh;overflow-y:auto}
+/* 移动弹窗 */
+.move-modal{max-width:340px;padding:20px}
+.move-modal h3{margin-bottom:6px;color:#2D3047}
+.move-entry-name{color:#8B7355;font-size:.9rem;margin-bottom:16px}
+.move-target-list{max-height:320px;overflow-y:auto;margin:-4px -8px;padding:4px 8px}
+.move-target-item{display:flex;align-items:center;gap:8px;padding:12px 12px;border-radius:10px;cursor:pointer;transition:background .15s}
+.move-target-item:hover{background:rgba(139,115,85,.06)}
+.move-target-item:active{background:rgba(139,115,85,.12)}
+.move-target-item.current{background:rgba(139,115,85,.08);cursor:default}
+.move-target-item.current:hover{background:rgba(139,115,85,.08)}
+.move-target-item.root-item{border-bottom:1px solid rgba(139,115,85,.1);margin-bottom:8px;padding-bottom:14px;border-radius:10px 10px 0 0}
+.expand-toggle{width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-size:.65rem;color:#8B7355;transition:transform .2s;cursor:pointer;flex-shrink:0}
+.expand-toggle:hover{color:#2D3047}
+.expand-toggle.expanded{transform:rotate(90deg)}
+.expand-placeholder{width:18px;flex-shrink:0}
+.move-target-icon{font-size:1rem;flex-shrink:0}
+.move-target-name{color:#2D3047;font-size:.92rem;flex:1}
+.current-badge{font-size:.7rem;color:#999;background:rgba(0,0,0,.05);padding:2px 8px;border-radius:8px}
+.move-empty{text-align:center;color:#999;padding:20px;font-size:.9rem}
+.move-empty{text-align:center;color:#888;padding:30px 0}
 .modal-content h3{font-family:'ZCOOL XiaoWei',serif;font-size:1.3rem;color:#2D3047;margin-bottom:16px;text-align:center}
 .confirm-modal p{text-align:center;color:#666;margin-bottom:20px}
 .modal-hint{font-size:.85rem;color:#8B7355;margin-bottom:16px;text-align:center}
@@ -4144,4 +5228,241 @@ html,body,#root{height:100%;overflow:hidden}
 .settings-confirm-actions button{flex:1;padding:12px;border-radius:10px;border:none;font-size:.95rem;cursor:pointer}
 .settings-confirm-actions .cancel-btn{background:rgba(255,255,255,.1);color:#f4e4c1}
 .settings-confirm-actions .confirm-btn{background:linear-gradient(135deg,#8B7355 0%,#6B5344 100%);color:#f4e4c1}
+
+/* ============ 人设模式样式 ============ */
+
+/* 人设badge */
+.character-badge{background:rgba(139,115,85,.3);color:#D4A84B;font-size:.65rem;padding:2px 6px;border-radius:8px;margin-left:6px;font-weight:normal}
+
+/* 人设视图 */
+.character-view{padding:16px;padding-bottom:100px}
+.character-header{margin-bottom:20px;text-align:center}
+.character-header h1{color:#8B7355;font-family:'ZCOOL XiaoWei',serif;font-size:1.4rem;margin-bottom:8px}
+.character-hint{color:rgba(139,115,85,.6);font-size:.85rem}
+.character-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+
+/* 深色工牌卡片 */
+.character-card.dark{background:linear-gradient(145deg,#3a3d52 0%,#2a2d3e 100%);border-radius:12px;padding:16px 12px;position:relative;cursor:pointer;transition:all .3s ease;border:1px solid rgba(244,228,193,.15)}
+.character-card.dark::before{content:'';position:absolute;top:-8px;left:50%;transform:translateX(-50%);width:20px;height:12px;background:linear-gradient(180deg,#8B7355 0%,#6B5344 100%);border-radius:4px 4px 0 0}
+.character-card.dark::after{content:'';position:absolute;top:-4px;left:50%;transform:translateX(-50%);width:8px;height:4px;background:#1a1d2e;border-radius:2px}
+.character-card.dark:active{transform:scale(.98);border-color:rgba(212,168,75,.4)}
+.character-card .card-avatar{width:80px;height:80px;margin:8px auto 12px;border-radius:8px;overflow:hidden;border:2px solid rgba(244,228,193,.2);background:rgba(0,0,0,.2);display:flex;align-items:center;justify-content:center;position:relative}
+.character-card .card-avatar img{width:100%;height:100%;object-fit:cover}
+.character-card .card-avatar .placeholder{font-size:2rem;color:rgba(244,228,193,.3)}
+.character-card .card-number{position:absolute;top:4px;right:4px;background:rgba(139,115,85,.8);color:#f4e4c1;font-size:.6rem;padding:2px 6px;border-radius:4px;font-family:monospace}
+.character-card .card-name{text-align:center;color:#f4e4c1;font-size:1.1rem;font-family:'ZCOOL XiaoWei',serif;margin-bottom:10px;letter-spacing:2px}
+.character-card .card-tags{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-bottom:12px;min-height:24px}
+.character-card .tag{background:rgba(244,228,193,.1);color:rgba(244,228,193,.7);font-size:.7rem;padding:3px 8px;border-radius:10px;border:1px solid rgba(244,228,193,.15)}
+.character-card .tag.highlight{background:rgba(212,168,75,.2);color:#D4A84B;border-color:rgba(212,168,75,.3)}
+.character-card .card-footer{display:flex;align-items:center;justify-content:space-between;padding-top:10px;border-top:1px dashed rgba(244,228,193,.15)}
+.character-card .card-footer .divider{flex:1;height:1px;background:repeating-linear-gradient(90deg,rgba(244,228,193,.2) 0px,rgba(244,228,193,.2) 4px,transparent 4px,transparent 8px)}
+.character-card .card-footer .arrow{color:rgba(244,228,193,.4);font-size:.9rem;margin-left:8px}
+.character-card .stamp{position:absolute;bottom:8px;left:8px;width:28px;height:28px;border:2px solid rgba(180,80,80,.4);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.6rem;color:rgba(180,80,80,.5);transform:rotate(-15deg)}
+
+/* 深色工牌新建卡片 */
+.character-card.dark.add-new{border:2px dashed rgba(244,228,193,.2);background:transparent;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:180px}
+.character-card.dark.add-new::before,.character-card.dark.add-new::after{display:none}
+.character-card.dark.add-new:active{border-color:rgba(212,168,75,.5);background:rgba(212,168,75,.05)}
+.character-card .add-icon{font-size:2.5rem;color:rgba(244,228,193,.3);margin-bottom:8px}
+.character-card .add-text{color:rgba(244,228,193,.4);font-size:.85rem}
+
+/* 复古档案卡片 */
+.character-card-v2{background:linear-gradient(180deg,#f4e4c1 0%,#e8d5a8 100%);border-radius:4px;overflow:hidden;cursor:pointer;transition:all .3s ease;box-shadow:0 2px 8px rgba(0,0,0,.3)}
+.character-card-v2:active{transform:scale(.98)}
+.character-card-v2 .card-v2-header{background:linear-gradient(135deg,#8B7355 0%,#6B5344 100%);padding:8px 12px;display:flex;justify-content:space-between;align-items:center}
+.character-card-v2 .card-v2-header .label{color:#f4e4c1;font-size:.65rem;letter-spacing:2px}
+.character-card-v2 .card-v2-header .code{color:rgba(244,228,193,.7);font-size:.6rem;font-family:monospace}
+.character-card-v2 .card-v2-body{padding:12px;display:flex;gap:12px}
+.character-card-v2 .card-v2-avatar{width:60px;height:72px;border:1px solid #8B7355;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.character-card-v2 .card-v2-avatar img{width:100%;height:100%;object-fit:cover}
+.character-card-v2 .card-v2-avatar .placeholder{color:#ccc;font-size:1.5rem}
+.character-card-v2 .card-v2-info{flex:1;min-width:0}
+.character-card-v2 .card-v2-name{color:#2D3047;font-size:1rem;font-family:'ZCOOL XiaoWei',serif;margin-bottom:6px;border-bottom:1px solid rgba(45,48,71,.2);padding-bottom:4px}
+.character-card-v2 .card-v2-tags{display:flex;flex-wrap:wrap;gap:4px}
+.character-card-v2 .card-v2-tags .tag{background:rgba(45,48,71,.1);color:#2D3047;font-size:.65rem;padding:2px 6px;border-radius:2px;border:none}
+.character-card-v2 .card-v2-footer{padding:8px 12px;display:flex;justify-content:space-between;align-items:center;border-top:1px dashed rgba(139,115,85,.3)}
+.character-card-v2 .card-v2-stamp{width:32px;height:32px;border:2px solid rgba(180,60,60,.5);border-radius:4px;display:flex;align-items:center;justify-content:center;color:rgba(180,60,60,.6);font-size:.5rem;transform:rotate(-8deg);font-weight:bold}
+.character-card-v2 .card-v2-arrow{color:#8B7355;font-size:.8rem}
+
+/* 复古档案新建卡片 */
+.character-card-v2.add-new{background:transparent;border:2px dashed rgba(139,115,85,.3);display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:150px;box-shadow:none}
+.character-card-v2.add-new .add-icon{font-size:2rem;color:rgba(139,115,85,.4)}
+.character-card-v2.add-new .add-text{color:rgba(139,115,85,.5);font-size:.8rem;margin-top:8px}
+
+/* 人设编辑弹窗 */
+.character-edit-modal{max-width:340px}
+.character-modal-overlay{z-index:6100}
+.character-edit-modal h3{color:#2D3047}
+.character-edit-modal .avatar-upload{width:100px;height:100px;margin:0 auto 20px;border-radius:12px;border:2px dashed rgba(139,115,85,.4);display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;background:rgba(139,115,85,.1)}
+.character-edit-modal .avatar-upload img{width:100%;height:100%;object-fit:cover}
+.character-edit-modal .avatar-upload .upload-placeholder{color:#8B7355;font-size:.85rem;text-align:center}
+.character-edit-modal input,.character-edit-modal textarea{width:100%;padding:12px;background:rgba(255,255,255,.9);border:1px solid rgba(139,115,85,.3);border-radius:10px;color:#2D3047;font-size:.95rem;margin-bottom:12px;box-sizing:border-box}
+.character-edit-modal input:focus,.character-edit-modal textarea:focus{outline:none;border-color:#8B7355}
+.character-edit-modal input::placeholder,.character-edit-modal textarea::placeholder{color:rgba(45,48,71,.4)}
+
+/* 人设详情页 */
+.character-detail-page{position:fixed;inset:0;background:linear-gradient(180deg,#1a1d2e 0%,#252839 100%);z-index:6000;display:flex;flex-direction:column;animation:slideUpProfile .3s ease-out}
+.character-detail-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;padding-top:calc(16px + env(safe-area-inset-top));background:rgba(0,0,0,.15);border-bottom:1px solid rgba(244,228,193,.06)}
+.character-detail-header .back-btn{background:none;border:none;color:#f4e4c1;font-size:1.3rem;cursor:pointer;padding:8px}
+.character-detail-header h2{color:#f4e4c1;font-family:'ZCOOL XiaoWei',serif;font-size:1.1rem}
+.character-detail-header .read-mode-toggle{display:flex;align-items:center;gap:6px}
+.character-detail-content{flex:1;overflow-y:auto;padding:20px;padding-bottom:calc(40px + env(safe-area-inset-bottom))}
+
+/* 人物档案卡片 - 米棕色风格 */
+.char-profile-card{border-radius:16px;overflow:hidden;margin-bottom:24px}
+.char-profile-card.dark{background:linear-gradient(145deg,#3a3d52 0%,#2a2d3e 100%);border:1px solid rgba(244,228,193,.15)}
+.char-profile-card.light{background:linear-gradient(180deg,#f4e4c1 0%,#e8d5a8 100%);border:none}
+.profile-main{padding:20px;display:flex;gap:18px;align-items:flex-start}
+.profile-avatar{width:85px;height:105px;border-radius:10px;overflow:hidden;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.char-profile-card.dark .profile-avatar{background:rgba(0,0,0,.25);border:2px solid rgba(244,228,193,.15)}
+.char-profile-card.light .profile-avatar{background:#fff;border:2px solid #8B7355}
+.profile-avatar img{width:100%;height:100%;object-fit:cover}
+.profile-avatar .avatar-placeholder{font-size:2.2rem}
+.char-profile-card.dark .avatar-placeholder{color:rgba(244,228,193,.25)}
+.char-profile-card.light .avatar-placeholder{color:#ccc}
+.profile-info{flex:1;min-width:0}
+.profile-name{font-size:1.4rem;font-family:'ZCOOL XiaoWei',serif;margin-bottom:12px;font-weight:400}
+.char-profile-card.dark .profile-name{color:#f4e4c1}
+.char-profile-card.light .profile-name{color:#2D3047}
+.profile-tags{display:flex;flex-wrap:wrap;gap:8px}
+.profile-tag{padding:5px 14px;border-radius:14px;font-size:.82rem}
+.char-profile-card.dark .profile-tag{background:rgba(244,228,193,.08);color:rgba(244,228,193,.75);border:1px solid rgba(244,228,193,.08)}
+.char-profile-card.light .profile-tag{background:rgba(45,48,71,.08);color:#2D3047;border:1px solid rgba(45,48,71,.1)}
+.profile-summary{padding:0 20px 16px;border-top:1px solid rgba(0,0,0,.08);margin-top:-4px;padding-top:16px}
+.summary-label{font-size:.75rem;margin-bottom:6px}
+.char-profile-card.dark .summary-label{color:rgba(244,228,193,.4)}
+.char-profile-card.light .summary-label{color:rgba(45,48,71,.5)}
+.profile-summary p{font-size:.9rem;line-height:1.65;margin:0}
+.char-profile-card.dark .profile-summary p{color:rgba(244,228,193,.7)}
+.char-profile-card.light .profile-summary p{color:#2D3047}
+.profile-stamp{text-align:center;padding:10px;border-top:1px dashed rgba(0,0,0,.1);font-size:.72rem;letter-spacing:3px}
+.char-profile-card.dark .profile-stamp{color:rgba(180,80,80,.4)}
+.char-profile-card.light .profile-stamp{color:rgba(180,60,60,.5)}
+
+/* 详细设定区 - 有背景边框 */
+.char-detail-section{margin-top:8px}
+.detail-title{color:rgba(244,228,193,.6);font-size:.88rem;margin-bottom:12px;padding-left:2px}
+.detail-box{background:rgba(255,255,255,.04);border:1px solid rgba(244,228,193,.1);border-radius:12px;padding:16px;min-height:200px}
+.detail-editor{width:100%;min-height:280px;padding:0;background:transparent;border:none;color:#f4e4c1;font-size:.95rem;line-height:1.9;resize:none;font-family:'Noto Serif SC',serif;overflow:hidden}
+.detail-editor:focus{outline:none}
+.detail-editor::placeholder{color:rgba(244,228,193,.3)}
+.detail-content{min-height:100px}
+.detail-body{color:#f4e4c1;font-size:.95rem;line-height:1.9}
+.detail-content .empty-hint{color:rgba(244,228,193,.35);text-align:center;padding:50px 0}
+
+/* 人物档案页链接样式 - 亮金色 */
+.detail-body .char-link{color:#D4A84B;background:linear-gradient(180deg,transparent 65%,rgba(212,168,75,.2) 65%);cursor:pointer}
+.detail-body .char-link.broken{color:rgba(244,228,193,.35);background:none}
+
+/* 关系网页面 - 全新设计 */
+.relation-network-page{position:fixed;inset:0;background:linear-gradient(180deg,#1a1d2e 0%,#252839 100%);z-index:6000;display:flex;flex-direction:column;animation:slideUpProfile .3s ease-out}
+.network-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;background:rgba(0,0,0,.15);border-bottom:1px solid rgba(244,228,193,.08)}
+.network-header .back-btn{background:none;border:none;color:#f4e4c1;font-size:1.3rem;cursor:pointer;padding:4px}
+.network-header h2{color:#f4e4c1;font-family:'ZCOOL XiaoWei',serif;font-size:1.1rem;flex:1;text-align:center}
+.network-header .add-relation-btn{background:rgba(212,168,75,.15);border:1px solid rgba(212,168,75,.3);color:#D4A84B;padding:8px 14px;border-radius:20px;font-size:.8rem;cursor:pointer}
+.relation-list-container{flex:1;overflow-y:auto;padding:16px}
+
+/* 头像栏 */
+.relation-avatars{display:flex;gap:8px;padding:12px;overflow-x:auto;background:rgba(0,0,0,.12);border-radius:16px;margin-bottom:20px}
+.relation-avatar-item{display:flex;flex-direction:column;align-items:center;gap:6px;flex-shrink:0;cursor:pointer;padding:8px 10px;border-radius:12px;transition:all .2s;min-width:70px}
+.relation-avatar-item:active{transform:scale(.95)}
+.relation-avatar-item.selected{background:rgba(212,168,75,.15)}
+.relation-avatar-item.selected .avatar-circle{border-color:#D4A84B;box-shadow:0 0 16px rgba(212,168,75,.35)}
+.relation-avatar-item .avatar-circle{width:48px;height:48px;border-radius:50%;overflow:hidden;background:rgba(244,228,193,.08);display:flex;align-items:center;justify-content:center;font-size:1.4rem;border:2px solid rgba(244,228,193,.2);transition:all .25s}
+.relation-avatar-item .avatar-circle img{width:100%;height:100%;object-fit:cover}
+.relation-avatar-item .avatar-name{color:rgba(244,228,193,.85);font-size:.75rem;max-width:65px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* 关系列表 */
+.relation-list{min-height:200px}
+.relation-empty{text-align:center;padding:60px 20px;color:rgba(244,228,193,.4)}
+.relation-empty span{font-size:3rem;display:block;margin-bottom:16px;opacity:.6}
+.relation-empty p{margin:6px 0;font-size:.9rem}
+
+/* 关系卡片 - 全新布局 */
+.relation-card{background:rgba(255,255,255,.04);border-radius:14px;margin-bottom:12px;overflow:hidden;border:1px solid rgba(244,228,193,.06);transition:all .2s}
+.relation-card.expanded{background:rgba(255,255,255,.06);border-color:rgba(244,228,193,.12)}
+.relation-card-main{display:flex;align-items:center;padding:14px 12px;cursor:pointer;gap:10px}
+.relation-card-main:active{background:rgba(255,255,255,.03)}
+
+/* 人物信息 */
+.relation-person{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:70px;flex-shrink:0}
+.person-avatar{width:42px;height:42px;border-radius:50%;overflow:hidden;background:rgba(244,228,193,.08);display:flex;align-items:center;justify-content:center;font-size:1.2rem}
+.person-avatar img{width:100%;height:100%;object-fit:cover}
+.person-name{color:#f4e4c1;font-size:.8rem;max-width:70px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2}
+
+/* 关系连接器 - 支持换行 */
+.relation-connector{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;min-width:60px;padding:0 4px}
+.connector-line{position:relative;width:100%;min-height:24px;display:flex;align-items:center;justify-content:center}
+.connector-label{background:rgba(30,33,48,.9);padding:4px 10px;color:rgba(244,228,193,.95);font-size:.78rem;text-align:center;border-radius:10px;border:1px solid rgba(244,228,193,.12);line-height:1.4;word-break:break-all;max-width:120px}
+.connector-arrow{color:rgba(244,228,193,.45);font-size:1rem;margin-top:2px}
+
+/* 展开指示 */
+.expand-indicator{color:rgba(244,228,193,.3);font-size:.7rem;margin-left:auto;padding-left:8px}
+
+/* 展开内容 */
+.relation-card-expand{padding:0 14px 14px;border-top:1px solid rgba(244,228,193,.06)}
+.story-section{margin-top:12px}
+.story-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.story-header span{color:rgba(244,228,193,.6);font-size:.85rem}
+.story-header button{background:rgba(244,228,193,.08);border:none;color:rgba(244,228,193,.7);padding:5px 12px;border-radius:6px;font-size:.75rem;cursor:pointer}
+.story-content{background:rgba(0,0,0,.15);border-radius:10px;padding:12px 14px;color:rgba(244,228,193,.75);font-size:.85rem;line-height:1.7;min-height:50px;white-space:pre-wrap}
+.story-content .no-story{color:rgba(244,228,193,.35);font-style:italic}
+.story-editor textarea{width:100%;min-height:100px;padding:12px;background:rgba(255,255,255,.92);border:none;border-radius:10px;color:#2D3047;font-size:.9rem;line-height:1.6;resize:vertical;font-family:inherit}
+.story-btns{display:flex;gap:10px;justify-content:flex-end;margin-top:10px}
+.story-btns .cancel{background:none;border:1px solid rgba(244,228,193,.25);color:rgba(244,228,193,.6);padding:7px 16px;border-radius:8px;font-size:.8rem;cursor:pointer}
+.story-btns .save{background:#D4A84B;border:none;color:#1a1d2e;padding:7px 16px;border-radius:8px;font-size:.8rem;cursor:pointer;font-weight:500}
+
+/* 统计 */
+.relation-stats{text-align:center;padding:20px;color:rgba(244,228,193,.4);font-size:.8rem}
+
+/* 关系网长按菜单 */
+.relation-context-overlay{position:fixed;inset:0;z-index:6100}
+.relation-context-menu{position:fixed;z-index:6200;background:#fff;border-radius:12px;overflow:hidden;min-width:140px;box-shadow:0 4px 20px rgba(0,0,0,.15)}
+.relation-context-menu button{display:flex;align-items:center;gap:10px;width:100%;padding:14px 18px;background:none;border:none;color:#2D3047;font-size:.9rem;cursor:pointer;text-align:left}
+.relation-context-menu button:active{background:#f5f5f5}
+.relation-context-menu button.danger{color:#e53935}
+.relation-context-menu button:not(:last-child){border-bottom:1px solid #eee}
+.relation-context-menu button span{font-size:1rem}
+
+/* 添加关系弹窗 */
+.relation-modal{max-width:360px}
+.relation-modal-overlay{z-index:6200}
+.relation-modal h3{color:#2D3047}
+.relation-form{margin-bottom:20px}
+.relation-people{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.relation-select-wrap{flex:1}
+.relation-select-wrap select{width:100%;padding:12px;background:#fff;border:1px solid rgba(139,115,85,.3);border-radius:10px;color:#2D3047;font-size:.95rem;font-family:'Noto Serif SC',serif;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238B7355' d='M6 8L1 3h10z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;cursor:pointer}
+.relation-select-wrap select:focus{outline:none;border-color:#8B7355}
+.relation-select-wrap select option{padding:10px;font-family:'Noto Serif SC',serif}
+.relation-arrow{color:#8B7355;font-size:1.4rem;font-weight:bold}
+.relation-form input{width:100%;padding:12px;background:#fff;border:1px solid rgba(139,115,85,.3);border-radius:10px;color:#2D3047;font-size:.9rem;margin-bottom:12px;box-sizing:border-box}
+.relation-form input:focus{outline:none;border-color:#8B7355}
+.relation-form input::placeholder{color:rgba(45,48,71,.4)}
+.relation-options{display:flex;flex-direction:column;gap:12px}
+.option-group{display:flex;align-items:center;gap:12px}
+.option-group>span{color:#8B7355;font-size:.85rem;min-width:40px}
+.option-buttons{display:flex;gap:8px}
+.option-buttons button{padding:6px 14px;background:#fff;border:1px solid rgba(139,115,85,.3);border-radius:6px;color:#2D3047;font-size:.85rem;cursor:pointer}
+.option-buttons button.active{background:rgba(139,115,85,.2);border-color:#8B7355;color:#8B7355}
+.option-group input[type="range"]{flex:1;accent-color:#8B7355}
+.color-options{display:flex;gap:8px;flex-wrap:wrap}
+.color-dot{width:24px;height:24px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:all .2s}
+.color-dot.active{border-color:#f4e4c1;transform:scale(1.1)}
+
+/* 人设模式+菜单 */
+.character-add-menu{bottom:80px}
+
+/* 设置页卡片风格选择 */
+.card-style-options{display:flex;gap:12px;margin-top:12px}
+.card-style-option{flex:1;padding:12px;background:rgba(255,255,255,.05);border:2px solid transparent;border-radius:12px;cursor:pointer;text-align:center;transition:all .2s}
+.card-style-option.active{border-color:rgba(212,168,75,.5);background:rgba(212,168,75,.1)}
+.style-preview{width:60px;height:70px;margin:0 auto 8px;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+.style-preview.dark-preview{background:linear-gradient(145deg,#3a3d52 0%,#2a2d3e 100%)}
+.style-preview.light-preview{background:linear-gradient(180deg,#f4e4c1 0%,#e8d5a8 100%)}
+.style-preview .preview-avatar{font-size:1.2rem}
+.style-preview.dark-preview .preview-name{color:#f4e4c1;font-size:.5rem}
+.style-preview.light-preview .preview-name{color:#2D3047;font-size:.5rem}
+.style-label{color:rgba(244,228,193,.7);font-size:.8rem}
+
+@keyframes fadeInUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
 `;
