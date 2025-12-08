@@ -1085,18 +1085,27 @@ const AddEventModal = ({ isOpen, onClose, onSave, editingEvent, eras, years, all
   useEffect(() => {
     if (isOpen) {
       if (editingEvent) {
+        // 编辑模式：从yearId找到对应的year，再找到eraId
         const eventYear = years.find(y => y.id === editingEvent.yearId);
-        setEraId(eventYear?.eraId || eras[0]?.id || '');
-        setYearId(editingEvent.yearId || '');
+        if (eventYear) {
+          setEraId(eventYear.eraId);
+          setYearId(editingEvent.yearId);
+        } else {
+          // 如果找不到对应的year，使用最后一个纪年的最后一个年份
+          const lastEra = eras[eras.length - 1];
+          setEraId(lastEra?.id || '');
+          const eraYears = years.filter(y => y.eraId === lastEra?.id);
+          setYearId(eraYears[eraYears.length - 1]?.id || '');
+        }
         setMonth(editingEvent.month?.toString() || '');
         setDay(editingEvent.day?.toString() || '');
         setContent(editingEvent.content || '');
         setShowOnMain(editingEvent.showOnMain !== false);
       } else {
-        // 默认选中第一个纪年和最后一个年份
-        const firstEra = eras[0];
-        setEraId(firstEra?.id || '');
-        const eraYears = years.filter(y => y.eraId === firstEra?.id);
+        // 新建模式：默认选中【最后一个】纪年的【最后一个】年份
+        const lastEra = eras[eras.length - 1];
+        setEraId(lastEra?.id || '');
+        const eraYears = years.filter(y => y.eraId === lastEra?.id);
         setYearId(eraYears[eraYears.length - 1]?.id || '');
         setMonth('');
         setDay('');
@@ -1106,13 +1115,14 @@ const AddEventModal = ({ isOpen, onClose, onSave, editingEvent, eras, years, all
     }
   }, [isOpen, editingEvent, eras, years]);
   
-  // 当纪年变化时，自动选中该纪年的最后一个年份
+  // 当纪年变化时，自动选中该纪年的最后一个年份（仅新建模式）
   useEffect(() => {
-    if (eraId && !editingEvent) {
+    if (eraId && !editingEvent && isOpen) {
       const eraYears = years.filter(y => y.eraId === eraId);
-      setYearId(eraYears[eraYears.length - 1]?.id || '');
+      const lastYearId = eraYears[eraYears.length - 1]?.id || '';
+      setYearId(lastYearId);
     }
-  }, [eraId, years, editingEvent]);
+  }, [eraId]);
   
   const canSave = () => {
     return content.trim() && yearId;
@@ -4893,7 +4903,12 @@ export default function App() {
       books: prev.books.map(b => b.id === currentBook.id ? {
         ...b,
         entries: updateEntryInTree(b.entries, currentEntry.id, {
-          timelineConfig: { ...config, eras: newEras, years: newYears }
+          timelineConfig: { 
+            eras: newEras,
+            years: newYears,
+            events: config.events || [],
+            subTimelines: config.subTimelines || []
+          }
         })
       } : b)
     }));
@@ -4911,7 +4926,12 @@ export default function App() {
       books: prev.books.map(b => b.id === currentBook.id ? {
         ...b,
         entries: updateEntryInTree(b.entries, currentEntry.id, {
-          timelineConfig: { ...config, eras: newEras }
+          timelineConfig: { 
+            eras: newEras,
+            years: config.years || [],
+            events: config.events || [],
+            subTimelines: config.subTimelines || []
+          }
         })
       } : b)
     }));
@@ -4936,7 +4956,12 @@ export default function App() {
       books: prev.books.map(b => b.id === currentBook.id ? {
         ...b,
         entries: updateEntryInTree(b.entries, currentEntry.id, {
-          timelineConfig: { ...config, eras: newEras, years: newYears, events: newEvents }
+          timelineConfig: { 
+            eras: newEras,
+            years: newYears,
+            events: newEvents,
+            subTimelines: config.subTimelines || []
+          }
         })
       } : b)
     }));
@@ -4954,7 +4979,12 @@ export default function App() {
       books: prev.books.map(b => b.id === currentBook.id ? {
         ...b,
         entries: updateEntryInTree(b.entries, currentEntry.id, {
-          timelineConfig: { ...config, years: newYears }
+          timelineConfig: { 
+            eras: config.eras || [],
+            years: newYears,
+            events: config.events || [],
+            subTimelines: config.subTimelines || []
+          }
         })
       } : b)
     }));
@@ -4972,7 +5002,12 @@ export default function App() {
       books: prev.books.map(b => b.id === currentBook.id ? {
         ...b,
         entries: updateEntryInTree(b.entries, currentEntry.id, {
-          timelineConfig: { ...config, years: newYears }
+          timelineConfig: { 
+            eras: config.eras || [],
+            years: newYears,
+            events: config.events || [],
+            subTimelines: config.subTimelines || []
+          }
         })
       } : b)
     }));
@@ -4993,7 +5028,12 @@ export default function App() {
       books: prev.books.map(b => b.id === currentBook.id ? {
         ...b,
         entries: updateEntryInTree(b.entries, currentEntry.id, {
-          timelineConfig: { ...config, years: newYears, events: newEvents }
+          timelineConfig: { 
+            eras: config.eras || [],
+            years: newYears,
+            events: newEvents,
+            subTimelines: config.subTimelines || []
+          }
         })
       } : b)
     }));
@@ -5003,7 +5043,7 @@ export default function App() {
   const handleAddTimelineEvent = (eventData) => {
     if (!currentEntry?.timelineMode) return;
     
-    const config = currentEntry.timelineConfig || { eras: [], events: [], subTimelines: [] };
+    const config = currentEntry.timelineConfig || { eras: [], years: [], events: [], subTimelines: [] };
     const newEvents = [...(config.events || []), eventData];
     
     setData(prev => ({
@@ -5011,7 +5051,12 @@ export default function App() {
       books: prev.books.map(b => b.id === currentBook.id ? {
         ...b,
         entries: updateEntryInTree(b.entries, currentEntry.id, {
-          timelineConfig: { ...config, events: newEvents }
+          timelineConfig: { 
+            eras: config.eras || [],
+            years: config.years || [],
+            events: newEvents,
+            subTimelines: config.subTimelines || []
+          }
         })
       } : b)
     }));
@@ -5021,7 +5066,7 @@ export default function App() {
   const handleUpdateTimelineEvent = (eventData) => {
     if (!currentEntry?.timelineMode) return;
     
-    const config = currentEntry.timelineConfig || { eras: [], events: [], subTimelines: [] };
+    const config = currentEntry.timelineConfig || { eras: [], years: [], events: [], subTimelines: [] };
     const newEvents = (config.events || []).map(e => e.id === eventData.id ? eventData : e);
     
     setData(prev => ({
@@ -5029,7 +5074,12 @@ export default function App() {
       books: prev.books.map(b => b.id === currentBook.id ? {
         ...b,
         entries: updateEntryInTree(b.entries, currentEntry.id, {
-          timelineConfig: { ...config, events: newEvents }
+          timelineConfig: { 
+            eras: config.eras || [],
+            years: config.years || [],
+            events: newEvents,
+            subTimelines: config.subTimelines || []
+          }
         })
       } : b)
     }));
@@ -5040,7 +5090,7 @@ export default function App() {
   const handleDeleteTimelineEvent = (eventId) => {
     if (!currentEntry?.timelineMode) return;
     
-    const config = currentEntry.timelineConfig || { eras: [], events: [], subTimelines: [] };
+    const config = currentEntry.timelineConfig || { eras: [], years: [], events: [], subTimelines: [] };
     const newEvents = (config.events || []).filter(e => e.id !== eventId);
     
     setData(prev => ({
@@ -5048,7 +5098,12 @@ export default function App() {
       books: prev.books.map(b => b.id === currentBook.id ? {
         ...b,
         entries: updateEntryInTree(b.entries, currentEntry.id, {
-          timelineConfig: { ...config, events: newEvents }
+          timelineConfig: { 
+            eras: config.eras || [],
+            years: config.years || [],
+            events: newEvents,
+            subTimelines: config.subTimelines || []
+          }
         })
       } : b)
     }));
@@ -5058,7 +5113,7 @@ export default function App() {
   const handleReorderEvent = (draggedId, targetId) => {
     if (!currentEntry?.timelineMode) return;
     
-    const config = currentEntry.timelineConfig || { eras: [], events: [], subTimelines: [] };
+    const config = currentEntry.timelineConfig || { eras: [], years: [], events: [], subTimelines: [] };
     const events = [...(config.events || [])];
     
     const draggedIndex = events.findIndex(e => e.id === draggedId);
@@ -5078,7 +5133,12 @@ export default function App() {
       books: prev.books.map(b => b.id === currentBook.id ? {
         ...b,
         entries: updateEntryInTree(b.entries, currentEntry.id, {
-          timelineConfig: { ...config, events: newEvents }
+          timelineConfig: { 
+            eras: config.eras || [],
+            years: config.years || [],
+            events: newEvents,
+            subTimelines: config.subTimelines || []
+          }
         })
       } : b)
     }));
@@ -5088,7 +5148,7 @@ export default function App() {
   const handleAddSubTimeline = (subTimelineData) => {
     if (!currentEntry?.timelineMode) return;
     
-    const config = currentEntry.timelineConfig || { eras: [], events: [], subTimelines: [] };
+    const config = currentEntry.timelineConfig || { eras: [], years: [], events: [], subTimelines: [] };
     const newSubTimelines = [...(config.subTimelines || []), subTimelineData];
     
     setData(prev => ({
@@ -5096,7 +5156,12 @@ export default function App() {
       books: prev.books.map(b => b.id === currentBook.id ? {
         ...b,
         entries: updateEntryInTree(b.entries, currentEntry.id, {
-          timelineConfig: { ...config, subTimelines: newSubTimelines }
+          timelineConfig: { 
+            eras: config.eras || [],
+            years: config.years || [],
+            events: config.events || [],
+            subTimelines: newSubTimelines
+          }
         })
       } : b)
     }));
@@ -5106,7 +5171,7 @@ export default function App() {
   const handleDeleteSubTimeline = (subTimelineId) => {
     if (!currentEntry?.timelineMode) return;
     
-    const config = currentEntry.timelineConfig || { eras: [], events: [], subTimelines: [] };
+    const config = currentEntry.timelineConfig || { eras: [], years: [], events: [], subTimelines: [] };
     const newSubTimelines = (config.subTimelines || []).filter(st => st.id !== subTimelineId);
     // 同时清除事件中对该子轴的引用
     const newEvents = (config.events || []).map(e => 
@@ -5118,7 +5183,12 @@ export default function App() {
       books: prev.books.map(b => b.id === currentBook.id ? {
         ...b,
         entries: updateEntryInTree(b.entries, currentEntry.id, {
-          timelineConfig: { ...config, subTimelines: newSubTimelines, events: newEvents }
+          timelineConfig: { 
+            eras: config.eras || [],
+            years: config.years || [],
+            events: newEvents,
+            subTimelines: newSubTimelines
+          }
         })
       } : b)
     }));
