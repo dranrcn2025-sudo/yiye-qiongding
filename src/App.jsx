@@ -391,21 +391,46 @@ const AddCharacterCard = ({ style = 'dark', onClick }) => {
 // 人设详情页（完整词条页，上方身份证+下方内容编辑）
 const CharacterDetailPage = ({ entry, onClose, onSave, isReadOnly, cardStyle, allTitlesMap, onLinkClick, bookName }) => {
   const [isEditMode, setIsEditMode] = useState(false);
-  const [content, setContent] = useState(entry?.content || '');
+  const [content, setContent] = useState('');
   const contentRef = useRef(null);
+  
+  // 将HTML内容转换为纯文本（用于编辑模式）
+  const htmlToText = (html) => {
+    if (!html) return '';
+    return html
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>\s*<p>/gi, '\n\n')
+      .replace(/<p>/gi, '')
+      .replace(/<\/p>/gi, '')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
+  };
+  
+  // 将纯文本转换为HTML（用于保存）
+  const textToHtml = (text) => {
+    if (!text) return '';
+    return text
+      .split('\n')
+      .map(line => line || '<br>')
+      .join('<br>');
+  };
   
   useEffect(() => {
     if (entry) {
-      setContent(entry.content || '');
+      // 进入编辑模式时转换HTML为纯文本
+      setContent(htmlToText(entry.content || ''));
     }
   }, [entry]);
   
   // 渲染内容并绑定链接点击事件
   useEffect(() => {
-    if (!contentRef.current || !content || isEditMode) return;
+    if (!contentRef.current || !entry?.content || isEditMode) return;
     
     // 先处理换行，再处理链接
-    let html = content
+    let html = entry.content
       .split('\n')
       .map(line => line || '<br>')
       .join('<br>');
@@ -428,13 +453,14 @@ const CharacterDetailPage = ({ entry, onClose, onSave, isReadOnly, cardStyle, al
         }
       };
     });
-  }, [content, allTitlesMap, onLinkClick, isEditMode]);
+  }, [entry?.content, allTitlesMap, onLinkClick, isEditMode]);
   
   if (!entry) return null;
   
   const handleSaveContent = () => {
     if (onSave) {
-      onSave({ ...entry, content });
+      // 保存时将纯文本转换回适合存储的格式
+      onSave({ ...entry, content: content });
     }
     setIsEditMode(false);
   };
@@ -619,7 +645,7 @@ const CharacterEditModal = ({ isOpen, onClose, onSave, editingEntry }) => {
 };
 
 // 关系网页面 - 重新设计UI
-const RelationNetworkPage = ({ isOpen, onClose, entries, relations, onAddRelation, onDeleteRelation, onUpdateRelation, bookTitle, cardStyle }) => {
+const RelationNetworkPage = ({ isOpen, onClose, entries, relations, onAddRelation, onDeleteRelation, onUpdateRelation, bookTitle, cardStyle, allTitlesMap, onLinkClick }) => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedPerson, setSelectedPerson] = useState(null);
   const [expandedRelation, setExpandedRelation] = useState(null);
@@ -628,6 +654,48 @@ const RelationNetworkPage = ({ isOpen, onClose, entries, relations, onAddRelatio
   const [contextMenu, setContextMenu] = useState({ show: false, x: 0, y: 0, relation: null });
   const [editingRelation, setEditingRelation] = useState(null);
   const longPressTimer = useRef(null);
+  const storyContentRef = useRef(null);
+  
+  // 渲染故事内容并绑定链接点击
+  const renderStoryWithLinks = (story, relationId) => {
+    if (!story) return <span className="no-story">暂无记录，点击添加</span>;
+    
+    const parts = [];
+    let lastIndex = 0;
+    const regex = /【([^】]+)】/g;
+    let match;
+    
+    while ((match = regex.exec(story)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(story.substring(lastIndex, match.index));
+      }
+      const kw = match[1];
+      const targets = allTitlesMap?.get?.(kw);
+      if (targets?.length && onLinkClick) {
+        parts.push(
+          <span 
+            key={`${relationId}-${match.index}`} 
+            className="story-link" 
+            onClick={(e) => { 
+              e.stopPropagation(); 
+              const target = targets[0];
+              onLinkClick(kw, target.bookId, target.entry.id);
+              onClose();
+            }}
+          >
+            【{kw}】
+          </span>
+        );
+      } else {
+        parts.push(<span key={`${relationId}-${match.index}`} className="story-link broken">【{kw}】</span>);
+      }
+      lastIndex = match.index + match[0].length;
+    }
+    if (lastIndex < story.length) {
+      parts.push(story.substring(lastIndex));
+    }
+    return parts;
+  };
   
   if (!isOpen) return null;
   
@@ -797,7 +865,7 @@ const RelationNetworkPage = ({ isOpen, onClose, entries, relations, onAddRelatio
                           </div>
                         ) : (
                           <div className="story-content">
-                            {r.story || <span className="no-story">暂无记录，点击添加</span>}
+                            {renderStoryWithLinks(r.story, r.id)}
                           </div>
                         )}
                       </div>
@@ -1696,29 +1764,34 @@ const TimelineView = ({
                                 + 添加事件
                               </button>
                             ) : (yearEvents.length === 1 || isExpanded) ? (
-                              yearEvents.map(event => (
-                                <div 
-                                  key={event.id} 
-                                  className={`event-item ${isReordering ? 'draggable' : ''}`}
-                                  draggable={isReordering}
-                                  onDragStart={(e) => handleDragStart(e, event)}
-                                  onDragEnd={handleDragEnd}
-                                  onDragOver={(e) => handleDragOver(e, event)}
-                                  onTouchStart={(e) => handleEventLongPress(e, event)}
-                                  onTouchEnd={clearEventLongPress}
-                                  onTouchMove={clearEventLongPress}
-                                >
-                                  {isReordering && <span className="drag-handle">⋮⋮</span>}
-                                  {event.month && (
-                                    <span className="event-time">
-                                      {era.monthNames?.[event.month - 1] || `${event.month}月`}
-                                      {event.day && ` ${event.day}日`}
-                                    </span>
-                                  )}
-                                  <span className="event-content">{renderEventContent(event.content)}</span>
-                                  {event.subTimelineId && <span className="from-sub">📜</span>}
-                                </div>
-                              ))
+                              <>
+                                {yearEvents.map(event => (
+                                  <div 
+                                    key={event.id} 
+                                    className={`event-item ${isReordering ? 'draggable' : ''}`}
+                                    draggable={isReordering}
+                                    onDragStart={(e) => handleDragStart(e, event)}
+                                    onDragEnd={handleDragEnd}
+                                    onDragOver={(e) => handleDragOver(e, event)}
+                                    onTouchStart={(e) => handleEventLongPress(e, event)}
+                                    onTouchEnd={clearEventLongPress}
+                                    onTouchMove={clearEventLongPress}
+                                  >
+                                    {isReordering && <span className="drag-handle">⋮⋮</span>}
+                                    {event.month && (
+                                      <span className="event-time">
+                                        {era.monthNames?.[event.month - 1] || `${event.month}月`}
+                                        {event.day && ` ${event.day}日`}
+                                      </span>
+                                    )}
+                                    <span className="event-content">{renderEventContent(event.content)}</span>
+                                    {event.subTimelineId && <span className="from-sub">📜</span>}
+                                  </div>
+                                ))}
+                                <button className="add-event-btn inline" onClick={() => onAddEvent(year.id)}>
+                                  + 添加
+                                </button>
+                              </>
                             ) : (
                               <div className="events-collapsed" onClick={() => onToggleYear(year.id)}>
                                 <span className="first-event">{renderEventContent(yearEvents[0].content)}</span>
@@ -1766,7 +1839,12 @@ const TimelineView = ({
             <div className="context-item" onClick={() => { onEditEra(eraContextMenu.era); setEraContextMenu({ show: false }); }}>
               <span className="context-icon">✏️</span>编辑纪年
             </div>
-            <div className="context-item danger" onClick={() => { onDeleteEra(eraContextMenu.era.id); setEraContextMenu({ show: false }); }}>
+            <div className="context-item danger" onClick={() => { 
+              if (window.confirm(`确定删除纪年「${eraContextMenu.era.name}」？\n该纪年下的所有年份和事件都会被删除！`)) {
+                onDeleteEra(eraContextMenu.era.id); 
+              }
+              setEraContextMenu({ show: false }); 
+            }}>
               <span className="context-icon">🗑️</span>删除纪年
             </div>
           </div>
@@ -1784,7 +1862,12 @@ const TimelineView = ({
             <div className="context-item" onClick={() => { onEditYear(yearContextMenu.year); setYearContextMenu({ show: false }); }}>
               <span className="context-icon">✏️</span>编辑年份
             </div>
-            <div className="context-item danger" onClick={() => { onDeleteYear(yearContextMenu.year.id); setYearContextMenu({ show: false }); }}>
+            <div className="context-item danger" onClick={() => { 
+              if (window.confirm(`确定删除年份「${yearContextMenu.year.label}」？\n该年份下的所有事件都会被删除！`)) {
+                onDeleteYear(yearContextMenu.year.id); 
+              }
+              setYearContextMenu({ show: false }); 
+            }}>
               <span className="context-icon">🗑️</span>删除年份
             </div>
           </div>
@@ -2270,11 +2353,56 @@ const RocketModal = ({ isOpen, onClose, onFly, showToast, onLaunchStart }) => {
   );
 };
 const ContextMenu = ({ isOpen, position, onClose, options }) => {
+  const [expandedSubmenu, setExpandedSubmenu] = useState(null);
+  
+  useEffect(() => {
+    if (!isOpen) setExpandedSubmenu(null);
+  }, [isOpen]);
+  
   if (!isOpen) return null;
   const menuH = options.length * 50 + 20;
   const spaceBelow = window.innerHeight - position.y;
   const top = spaceBelow < menuH ? Math.max(10, position.y - menuH) : position.y;
-  return (<><div className="context-overlay" onClick={onClose} /><div className="context-menu" style={{ top, left: Math.min(position.x, window.innerWidth - 180) }}>{options.map((o, i) => (<div key={i} className={`context-item ${o.danger ? 'danger' : ''}`} onClick={() => { o.action(); onClose(); }}><span className="context-icon">{o.icon}</span>{o.label}</div>))}</div></>);
+  
+  return (
+    <>
+      <div className="context-overlay" onClick={onClose} />
+      <div className="context-menu" style={{ top, left: Math.min(position.x, window.innerWidth - 180) }}>
+        {options.map((o, i) => (
+          o.submenu ? (
+            <div key={i} className="context-item-wrapper">
+              <div 
+                className={`context-item has-submenu ${expandedSubmenu === i ? 'expanded' : ''}`} 
+                onClick={() => setExpandedSubmenu(expandedSubmenu === i ? null : i)}
+              >
+                <span className="context-icon">{o.icon}</span>
+                {o.label}
+                <span className="submenu-arrow">{expandedSubmenu === i ? '▼' : '▶'}</span>
+              </div>
+              {expandedSubmenu === i && (
+                <div className="context-submenu">
+                  {o.submenu.map((sub, j) => (
+                    <div 
+                      key={j} 
+                      className={`context-item submenu-item ${sub.active ? 'active' : ''}`} 
+                      onClick={() => { sub.action(); onClose(); }}
+                    >
+                      <span className="context-icon">{sub.icon}</span>
+                      {sub.label}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div key={i} className={`context-item ${o.danger ? 'danger' : ''}`} onClick={() => { o.action(); onClose(); }}>
+              <span className="context-icon">{o.icon}</span>{o.label}
+            </div>
+          )
+        ))}
+      </div>
+    </>
+  );
 };
 
 const EntryModal = ({ isOpen, onClose, onSave, editingEntry, parentTitle, isFolder }) => {
@@ -3699,6 +3827,23 @@ export default function App() {
         saveToStorage(cloudData.data);
         localStorage.setItem('lastUpdated', new Date(cloudData.updated_at).getTime().toString());
         setLastSyncTime(new Date(cloudData.updated_at));
+        
+        // 恢复用户资料到localStorage和state
+        if (cloudData.data.profile) {
+          const profile = cloudData.data.profile;
+          if (profile.name) {
+            localStorage.setItem('userName', profile.name);
+            setUserName(profile.name);
+          }
+          if (profile.bio !== undefined) {
+            localStorage.setItem('userBio', profile.bio);
+            setUserBio(profile.bio);
+          }
+          if (profile.shelfTitle !== undefined) {
+            localStorage.setItem('userShelfTitle', profile.shelfTitle);
+            setUserShelfTitle(profile.shelfTitle);
+          }
+        }
       } else {
         // 云端没有数据，使用初始数据并上传
         setData(initialData);
@@ -4142,32 +4287,33 @@ export default function App() {
           { icon: '✏️', label: '编辑信息', action: () => { setEditingEntry(item); setShowEntryModal(true); } }, 
           { icon: item.linkable ? '🚫' : '⭐', label: item.linkable ? '关闭跳转' : '开启跳转', action: () => setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, item.id, { linkable: !item.linkable }) } : b) })) }
         ];
-        // 如果是文件夹，添加正文模式和人设模式选项
+        // 如果是文件夹，添加特殊模式选项（正文/人设/时间轴互斥）
         if (item.isFolder) {
-          // 正文模式（与人设模式和时间轴模式互斥）
-          if (!item.characterMode && !item.timelineMode) {
-            opts.push({ 
-              icon: item.novelMode ? '📝' : '📖', 
-              label: item.novelMode ? '关闭正文模式' : '开启正文模式', 
-              action: () => setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, item.id, { novelMode: !item.novelMode }) } : b) })) 
-            });
-          }
-          // 人设模式（与正文模式和时间轴模式互斥）
-          if (!item.novelMode && !item.timelineMode) {
-            opts.push({ 
-              icon: item.characterMode ? '📝' : '👤', 
-              label: item.characterMode ? '关闭人设模式' : '开启人设模式', 
-              action: () => setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, item.id, { characterMode: !item.characterMode, characterRelations: item.characterRelations || [] }) } : b) })) 
-            });
-          }
-          // 时间轴模式（与正文模式和人设模式互斥）
-          if (!item.novelMode && !item.characterMode) {
-            opts.push({ 
-              icon: item.timelineMode ? '📝' : '📅', 
-              label: item.timelineMode ? '关闭时间轴模式' : '开启时间轴模式', 
-              action: () => setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, item.id, { timelineMode: !item.timelineMode, timelineConfig: item.timelineConfig || { eras: [], events: [], subTimelines: [] } }) } : b) })) 
-            });
-          }
+          const currentMode = item.novelMode ? 'novel' : item.characterMode ? 'character' : item.timelineMode ? 'timeline' : null;
+          opts.push({ 
+            icon: currentMode ? '✓' : '📋', 
+            label: currentMode === 'novel' ? '正文模式 ✓' : currentMode === 'character' ? '人设模式 ✓' : currentMode === 'timeline' ? '时间轴模式 ✓' : '开启特殊模式',
+            submenu: [
+              { 
+                icon: currentMode === 'novel' ? '✓' : '📖', 
+                label: '正文模式',
+                active: currentMode === 'novel',
+                action: () => setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, item.id, { novelMode: currentMode !== 'novel', characterMode: false, timelineMode: false }) } : b) }))
+              },
+              { 
+                icon: currentMode === 'character' ? '✓' : '👤', 
+                label: '人设模式',
+                active: currentMode === 'character',
+                action: () => setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, item.id, { novelMode: false, characterMode: currentMode !== 'character', timelineMode: false, characterRelations: item.characterRelations || [] }) } : b) }))
+              },
+              { 
+                icon: currentMode === 'timeline' ? '✓' : '📅', 
+                label: '时间轴模式',
+                active: currentMode === 'timeline',
+                action: () => setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, item.id, { novelMode: false, characterMode: false, timelineMode: currentMode !== 'timeline', timelineConfig: item.timelineConfig || { eras: [], years: [], events: [], subTimelines: [] } }) } : b) }))
+              }
+            ]
+          });
         }
         opts.push({ icon: '📁', label: '移动到...', action: () => { setMoveTarget(item); setShowMoveModal(true); } });
         opts.push({ icon: '🗑️', label: '删除', danger: true, action: () => setConfirmModal({ isOpen: true, title: '确认删除', message: `删除「${item.title}」？`, onConfirm: () => { setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: deleteEntryFromTree(b.entries, item.id) } : b) })); if (currentEntry?.id === item.id) handleBack(); setConfirmModal({ isOpen: false }); } }) });
@@ -5329,6 +5475,11 @@ export default function App() {
   const saveUserName = (name) => {
     setUserName(name);
     localStorage.setItem('userName', name);
+    // 延迟触发云同步（防抖）
+    if (user) {
+      clearTimeout(window.profileSyncTimer);
+      window.profileSyncTimer = setTimeout(() => saveToCloud(data), 2000);
+    }
   };
 
   // 上传头像
@@ -5361,12 +5512,22 @@ export default function App() {
   const saveUserBio = (bio) => {
     setUserBio(bio);
     localStorage.setItem('userBio', bio);
+    // 延迟触发云同步（防抖）
+    if (user) {
+      clearTimeout(window.profileSyncTimer);
+      window.profileSyncTimer = setTimeout(() => saveToCloud(data), 2000);
+    }
   };
 
   // 保存书架标题
   const saveShelfTitle = (title) => {
     setUserShelfTitle(title);
     localStorage.setItem('userShelfTitle', title);
+    // 延迟触发云同步（防抖）
+    if (user) {
+      clearTimeout(window.profileSyncTimer);
+      window.profileSyncTimer = setTimeout(() => saveToCloud(data), 2000);
+    }
   };
 
   // 统计数据
@@ -5681,7 +5842,7 @@ export default function App() {
   onSave={handleSaveStoryEdit}
   editingItem={storyEditItem}
   type={storyEditType}
-/><CharacterEditModal isOpen={showCharacterModal} onClose={() => { setShowCharacterModal(false); setEditingCharacter(null); }} onSave={editingCharacter ? handleUpdateCharacter : handleAddCharacter} editingEntry={editingCharacter} /><RelationNetworkPage isOpen={showRelationNetwork} onClose={() => setShowRelationNetwork(false)} entries={currentEntry?.children || []} relations={currentEntry?.characterRelations || []} onAddRelation={handleAddRelation} onDeleteRelation={handleDeleteRelation} onUpdateRelation={handleUpdateRelation} bookTitle={currentEntry?.title || ''} cardStyle={characterCardStyle} /><AddEraModal isOpen={showAddEraModal} onClose={() => { setShowAddEraModal(false); setEditingEra(null); }} onSave={editingEra ? handleUpdateEra : handleAddEra} editingEra={editingEra} /><AddYearModal isOpen={showAddYearModal} onClose={() => { setShowAddYearModal(false); setEditingYear(null); }} onSave={editingYear ? handleUpdateYear : handleAddYear} editingYear={editingYear} eras={currentEntry?.timelineConfig?.eras || []} /><AddEventModal isOpen={showAddEventModal} onClose={() => { setShowAddEventModal(false); setEditingEvent(null); }} onSave={editingEvent ? handleUpdateTimelineEvent : handleAddTimelineEvent} editingEvent={editingEvent} eras={currentEntry?.timelineConfig?.eras || []} years={currentEntry?.timelineConfig?.years || []} allTitlesMap={allTitlesMap} /><AddSubTimelineModal isOpen={showAddSubTimelineModal} onClose={() => setShowAddSubTimelineModal(false)} onSave={handleAddSubTimeline} eras={currentEntry?.timelineConfig?.eras || []} characters={[]} /><SubTimelineListPage isOpen={showSubTimelines} onClose={() => setShowSubTimelines(false)} subTimelines={currentEntry?.timelineConfig?.subTimelines || []} eras={currentEntry?.timelineConfig?.eras || []} onSelect={(st) => { setCurrentSubTimeline(st); setShowSubTimelines(false); }} onAdd={() => { setShowSubTimelines(false); setShowAddSubTimelineModal(true); }} onDelete={handleDeleteSubTimeline} />{showCharacterDetail && (<CharacterDetailPage entry={showCharacterDetail} onClose={() => setShowCharacterDetail(null)} onSave={(updatedEntry) => { setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, updatedEntry.id, { content: updatedEntry.content }) } : b) })); setShowCharacterDetail({ ...showCharacterDetail, content: updatedEntry.content }); }} isReadOnly={!!visitingBookshelf} cardStyle={characterCardStyle} allTitlesMap={allTitlesMap} onLinkClick={(kw, bookId, entryId) => { setShowCharacterDetail(null); handleLinkClick(kw, bookId, entryId); }} bookName={currentBook?.title} />)}{toast.show && <div className="app-toast">{toast.message}</div>}<style>{styles}</style></div>);
+/><CharacterEditModal isOpen={showCharacterModal} onClose={() => { setShowCharacterModal(false); setEditingCharacter(null); }} onSave={editingCharacter ? handleUpdateCharacter : handleAddCharacter} editingEntry={editingCharacter} /><RelationNetworkPage isOpen={showRelationNetwork} onClose={() => setShowRelationNetwork(false)} entries={currentEntry?.children || []} relations={currentEntry?.characterRelations || []} onAddRelation={handleAddRelation} onDeleteRelation={handleDeleteRelation} onUpdateRelation={handleUpdateRelation} bookTitle={currentEntry?.title || ''} cardStyle={characterCardStyle} allTitlesMap={allTitlesMap} onLinkClick={handleLinkClick} /><AddEraModal isOpen={showAddEraModal} onClose={() => { setShowAddEraModal(false); setEditingEra(null); }} onSave={editingEra ? handleUpdateEra : handleAddEra} editingEra={editingEra} /><AddYearModal isOpen={showAddYearModal} onClose={() => { setShowAddYearModal(false); setEditingYear(null); }} onSave={editingYear ? handleUpdateYear : handleAddYear} editingYear={editingYear} eras={currentEntry?.timelineConfig?.eras || []} /><AddEventModal isOpen={showAddEventModal} onClose={() => { setShowAddEventModal(false); setEditingEvent(null); }} onSave={editingEvent ? handleUpdateTimelineEvent : handleAddTimelineEvent} editingEvent={editingEvent} eras={currentEntry?.timelineConfig?.eras || []} years={currentEntry?.timelineConfig?.years || []} allTitlesMap={allTitlesMap} /><AddSubTimelineModal isOpen={showAddSubTimelineModal} onClose={() => setShowAddSubTimelineModal(false)} onSave={handleAddSubTimeline} eras={currentEntry?.timelineConfig?.eras || []} characters={[]} /><SubTimelineListPage isOpen={showSubTimelines} onClose={() => setShowSubTimelines(false)} subTimelines={currentEntry?.timelineConfig?.subTimelines || []} eras={currentEntry?.timelineConfig?.eras || []} onSelect={(st) => { setCurrentSubTimeline(st); setShowSubTimelines(false); }} onAdd={() => { setShowSubTimelines(false); setShowAddSubTimelineModal(true); }} onDelete={handleDeleteSubTimeline} />{showCharacterDetail && (<CharacterDetailPage entry={showCharacterDetail} onClose={() => setShowCharacterDetail(null)} onSave={(updatedEntry) => { setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, updatedEntry.id, { content: updatedEntry.content }) } : b) })); setShowCharacterDetail({ ...showCharacterDetail, content: updatedEntry.content }); }} isReadOnly={!!visitingBookshelf} cardStyle={characterCardStyle} allTitlesMap={allTitlesMap} onLinkClick={(kw, bookId, entryId) => { setShowCharacterDetail(null); handleLinkClick(kw, bookId, entryId); }} bookName={currentBook?.title} />)}{toast.show && <div className="app-toast">{toast.message}</div>}<style>{styles}</style></div>);
 }
 
 const styles = `
@@ -6817,6 +6978,24 @@ html,body,#root{height:100%;overflow:hidden}
 /* 确认删除弹窗 */
 .confirm-modal .warning{color:#e74c3c;font-size:.85rem;margin-top:8px}
 .btn-delete{background:#e74c3c;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer}
+
+/* 内联添加事件按钮 */
+.add-event-btn.inline{width:auto;margin-top:8px;padding:4px 12px;font-size:.8rem;opacity:.7}
+.add-event-btn.inline:hover{opacity:1}
+
+/* 上下文菜单子菜单 */
+.context-item-wrapper{position:relative}
+.context-item.has-submenu{display:flex;justify-content:space-between;align-items:center}
+.submenu-arrow{font-size:.7rem;color:#999;margin-left:auto}
+.context-submenu{background:#fff;border-top:1px solid #eee;padding:4px 0}
+.context-item.submenu-item{padding:12px 20px 12px 36px;font-size:.9rem}
+.context-item.submenu-item.active{color:#D4A84B;background:rgba(212,168,75,.1)}
+
+/* 关系网故事链接 */
+.story-link{color:#D4A84B;cursor:pointer;font-weight:500}
+.story-link:hover{text-decoration:underline}
+.story-link.broken{color:#999;cursor:default}
+.story-link.broken:hover{text-decoration:none}
 
 @keyframes fadeInUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
 `;
