@@ -980,6 +980,812 @@ const CharacterAddMenu = ({ isOpen, onClose, onAddCharacter, onOpenRelationNetwo
 };
 
 // ============ 人设模式组件结束 ============
+
+// ============ 时间轴模式组件 ============
+
+// 时间轴纪年设置弹窗
+const AddEraModal = ({ isOpen, onClose, onSave, editingEra }) => {
+  const [name, setName] = useState('');
+  const [startLabel, setStartLabel] = useState('');
+  const [months, setMonths] = useState(12);
+  const [days, setDays] = useState(30);
+  const [monthNames, setMonthNames] = useState('');
+  const [gapFromPrevious, setGapFromPrevious] = useState(0);
+  
+  useEffect(() => {
+    if (isOpen) {
+      if (editingEra) {
+        setName(editingEra.name || '');
+        setStartLabel(editingEra.startLabel || '');
+        setMonths(editingEra.months || 12);
+        setDays(editingEra.days || 30);
+        setMonthNames(editingEra.monthNames?.join('、') || '');
+        setGapFromPrevious(editingEra.gapFromPrevious || 0);
+      } else {
+        setName('');
+        setStartLabel('');
+        setMonths(12);
+        setDays(30);
+        setMonthNames('');
+        setGapFromPrevious(0);
+      }
+    }
+  }, [isOpen, editingEra]);
+  
+  const handleSave = () => {
+    if (!name.trim()) return;
+    const monthNameList = monthNames.trim() ? monthNames.split(/[,，、\s]+/).filter(m => m.trim()) : null;
+    onSave({
+      id: editingEra?.id || generateId(),
+      name: name.trim(),
+      startLabel: startLabel.trim() || '1年',
+      months: parseInt(months) || 12,
+      days: parseInt(days) || 30,
+      monthNames: monthNameList,
+      gapFromPrevious: parseInt(gapFromPrevious) || 0,
+      order: editingEra?.order || Date.now()
+    });
+    onClose();
+  };
+  
+  if (!isOpen) return null;
+  
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content era-modal" onClick={e => e.stopPropagation()}>
+        <h3>{editingEra ? '编辑纪年' : '创建纪年'}</h3>
+        <div className="form-field">
+          <label>纪年名称</label>
+          <input type="text" placeholder="如：大明、贞观、第一纪元" value={name} onChange={e => setName(e.target.value)} autoFocus />
+        </div>
+        <div className="form-field">
+          <label>第一年怎么称呼？</label>
+          <input type="text" placeholder="如：元年、1年（留空默认1年）" value={startLabel} onChange={e => setStartLabel(e.target.value)} />
+        </div>
+        <div className="era-number-row">
+          <div className="era-number-field">
+            <label>一年几个月</label>
+            <input type="number" value={months} onChange={e => setMonths(e.target.value)} min="1" max="100" />
+          </div>
+          <div className="era-number-field">
+            <label>一个月几天</label>
+            <input type="number" value={days} onChange={e => setDays(e.target.value)} min="1" max="100" />
+          </div>
+        </div>
+        <div className="form-field">
+          <label>月份名称（可选）</label>
+          <input type="text" placeholder="用顿号分隔，如：正月、二月...留空用数字" value={monthNames} onChange={e => setMonthNames(e.target.value)} />
+        </div>
+        <div className="era-gap-row">
+          <label>与上一纪年间隔</label>
+          <input type="number" value={gapFromPrevious} onChange={e => setGapFromPrevious(e.target.value)} min="0" />
+          <span>年</span>
+        </div>
+        <div className="modal-actions">
+          <button className="btn-cancel" onClick={onClose}>取消</button>
+          <button className="btn-save" onClick={handleSave} disabled={!name.trim()}>{editingEra ? '保存' : '创建'}</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// 添加时间节点弹窗
+const AddEventModal = ({ isOpen, onClose, onSave, editingEvent, eras, years, allTitlesMap }) => {
+  const [eraId, setEraId] = useState('');
+  const [yearId, setYearId] = useState('');
+  const [month, setMonth] = useState('');
+  const [day, setDay] = useState('');
+  const [content, setContent] = useState('');
+  const [showOnMain, setShowOnMain] = useState(true);
+  
+  // 根据选中的纪年过滤年份
+  const filteredYears = eraId ? years.filter(y => y.eraId === eraId) : [];
+  
+  useEffect(() => {
+    if (isOpen) {
+      if (editingEvent) {
+        const eventYear = years.find(y => y.id === editingEvent.yearId);
+        setEraId(eventYear?.eraId || eras[0]?.id || '');
+        setYearId(editingEvent.yearId || '');
+        setMonth(editingEvent.month?.toString() || '');
+        setDay(editingEvent.day?.toString() || '');
+        setContent(editingEvent.content || '');
+        setShowOnMain(editingEvent.showOnMain !== false);
+      } else {
+        // 默认选中第一个纪年和最后一个年份
+        const firstEra = eras[0];
+        setEraId(firstEra?.id || '');
+        const eraYears = years.filter(y => y.eraId === firstEra?.id);
+        setYearId(eraYears[eraYears.length - 1]?.id || '');
+        setMonth('');
+        setDay('');
+        setContent('');
+        setShowOnMain(true);
+      }
+    }
+  }, [isOpen, editingEvent, eras, years]);
+  
+  // 当纪年变化时，自动选中该纪年的最后一个年份
+  useEffect(() => {
+    if (eraId && !editingEvent) {
+      const eraYears = years.filter(y => y.eraId === eraId);
+      setYearId(eraYears[eraYears.length - 1]?.id || '');
+    }
+  }, [eraId, years, editingEvent]);
+  
+  const canSave = () => {
+    return content.trim() && yearId;
+  };
+  
+  const handleSave = () => {
+    if (!canSave()) return;
+    
+    onSave({
+      id: editingEvent?.id || generateId(),
+      yearId,
+      month: month ? parseInt(month) : null,
+      day: day ? parseInt(day) : null,
+      content: content.trim(),
+      showOnMain,
+      subTimelineId: editingEvent?.subTimelineId || null,
+      order: editingEvent?.order || Date.now(),
+      createdAt: editingEvent?.createdAt || Date.now(),
+      updatedAt: Date.now()
+    });
+    onClose();
+  };
+  
+  const selectedEra = eras.find(e => e.id === eraId);
+  
+  if (!isOpen) return null;
+  
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content event-modal" onClick={e => e.stopPropagation()}>
+        <h3>{editingEvent ? '编辑事件' : '添加事件'}</h3>
+        
+        <div className="time-selector">
+          <div className="time-row era-year-row">
+            <select value={eraId} onChange={e => setEraId(e.target.value)} className="era-select">
+              <option value="">选择纪年</option>
+              {eras.map(era => <option key={era.id} value={era.id}>{era.name}</option>)}
+            </select>
+            <select value={yearId} onChange={e => setYearId(e.target.value)} className="year-select">
+              <option value="">选择年份</option>
+              {filteredYears.map(year => <option key={year.id} value={year.id}>{year.label}</option>)}
+            </select>
+          </div>
+          {selectedEra && (
+            <div className="time-row month-day-row">
+              <select value={month} onChange={e => setMonth(e.target.value)}>
+                <option value="">月（可选）</option>
+                {Array.from({ length: selectedEra.months || 12 }, (_, i) => (
+                  <option key={i + 1} value={i + 1}>
+                    {selectedEra.monthNames?.[i] || `${i + 1}月`}
+                  </option>
+                ))}
+              </select>
+              <input type="number" placeholder="日" value={day} onChange={e => setDay(e.target.value)} min="1" max={selectedEra?.days || 30} />
+            </div>
+          )}
+        </div>
+        
+        <div className="content-input">
+          <label>发生了什么？</label>
+          <textarea 
+            placeholder="描述事件，可用【词条名】链接" 
+            value={content} 
+            onChange={e => setContent(e.target.value)}
+            rows={3}
+            autoFocus
+          />
+        </div>
+        
+        <label className="checkbox-label">
+          <input type="checkbox" checked={showOnMain} onChange={e => setShowOnMain(e.target.checked)} />
+          <span>同时显示在主时间轴</span>
+        </label>
+        
+        <div className="modal-actions">
+          <button className="btn-cancel" onClick={onClose}>取消</button>
+          <button className="btn-save" onClick={handleSave} disabled={!canSave()}>保存</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// 添加年份弹窗
+const AddYearModal = ({ isOpen, onClose, onSave, editingYear, eras }) => {
+  const [eraId, setEraId] = useState('');
+  const [label, setLabel] = useState('');
+  const [gapLabel, setGapLabel] = useState('');
+  
+  useEffect(() => {
+    if (isOpen) {
+      if (editingYear) {
+        setEraId(editingYear.eraId || '');
+        setLabel(editingYear.label || '');
+        setGapLabel(editingYear.gapLabel || '');
+      } else {
+        setEraId(eras[0]?.id || '');
+        setLabel('');
+        setGapLabel('');
+      }
+    }
+  }, [isOpen, editingYear, eras]);
+  
+  const handleSave = () => {
+    if (!eraId || !label.trim()) return;
+    
+    onSave({
+      id: editingYear?.id || generateId(),
+      eraId,
+      label: label.trim(),
+      gapLabel: gapLabel.trim() || null, // 如"间隔3个月"，留空则不显示
+      order: editingYear?.order || Date.now(),
+      createdAt: editingYear?.createdAt || Date.now()
+    });
+    onClose();
+  };
+  
+  if (!isOpen) return null;
+  
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content year-modal" onClick={e => e.stopPropagation()}>
+        <h3>{editingYear ? '编辑年份' : '添加年份'}</h3>
+        
+        {eras.length > 1 && (
+          <div className="form-field">
+            <label>所属纪年</label>
+            <select value={eraId} onChange={e => setEraId(e.target.value)}>
+              {eras.map(era => <option key={era.id} value={era.id}>{era.name}</option>)}
+            </select>
+          </div>
+        )}
+        
+        <div className="form-field">
+          <label>年份名称</label>
+          <input 
+            type="text" 
+            placeholder="如：2年、贞观二年" 
+            value={label} 
+            onChange={e => setLabel(e.target.value)} 
+            autoFocus 
+          />
+        </div>
+        
+        <div className="form-field">
+          <label>与上一年的间隔（可选）</label>
+          <input 
+            type="text" 
+            placeholder="如：3个月后、半年后（留空则连续）" 
+            value={gapLabel} 
+            onChange={e => setGapLabel(e.target.value)} 
+          />
+        </div>
+        
+        <div className="modal-actions">
+          <button className="btn-cancel" onClick={onClose}>取消</button>
+          <button className="btn-save" onClick={handleSave} disabled={!label.trim()}>保存</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// 添加子时间轴弹窗
+const AddSubTimelineModal = ({ isOpen, onClose, onSave, eras, characters }) => {
+  const [name, setName] = useState('');
+  const [icon, setIcon] = useState('📜');
+  const [linkedCharacterId, setLinkedCharacterId] = useState('');
+  const [startEraId, setStartEraId] = useState('');
+  const [startYear, setStartYear] = useState('');
+  const [endEraId, setEndEraId] = useState('');
+  const [endYear, setEndYear] = useState('');
+  
+  const icons = ['📜', '👤', '⚔️', '🏰', '🌍', '📖', '🗡️', '💫', '🔮', '👑'];
+  
+  useEffect(() => {
+    if (isOpen) {
+      setName('');
+      setIcon('📜');
+      setLinkedCharacterId('');
+      setStartEraId(eras[0]?.id || '');
+      setStartYear('');
+      setEndEraId(eras[0]?.id || '');
+      setEndYear('');
+    }
+  }, [isOpen, eras]);
+  
+  const handleSave = () => {
+    if (!name.trim()) return;
+    onSave({
+      id: generateId(),
+      name: name.trim(),
+      icon,
+      linkedCharacterId: linkedCharacterId || null,
+      rangeStart: startEraId && startYear ? { eraId: startEraId, year: parseInt(startYear) } : null,
+      rangeEnd: endEraId && endYear ? { eraId: endEraId, year: parseInt(endYear) } : null,
+      createdAt: Date.now()
+    });
+    onClose();
+  };
+  
+  if (!isOpen) return null;
+  
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content sub-timeline-modal" onClick={e => e.stopPropagation()}>
+        <h3>新建子时间轴</h3>
+        <div className="icon-selector">
+          {icons.map(i => (
+            <span key={i} className={`icon-option ${icon === i ? 'selected' : ''}`} onClick={() => setIcon(i)}>{i}</span>
+          ))}
+        </div>
+        <input type="text" placeholder="子轴名称（如：莉莉安的一生）" value={name} onChange={e => setName(e.target.value)} autoFocus />
+        
+        {characters && characters.length > 0 && (
+          <select value={linkedCharacterId} onChange={e => setLinkedCharacterId(e.target.value)}>
+            <option value="">关联人物（可选）</option>
+            {characters.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+          </select>
+        )}
+        
+        <div className="range-section">
+          <label>时间范围（可选）</label>
+          <div className="range-row">
+            <select value={startEraId} onChange={e => setStartEraId(e.target.value)}>
+              {eras.map(era => <option key={era.id} value={era.id}>{era.name}</option>)}
+            </select>
+            <input type="number" placeholder="起始年" value={startYear} onChange={e => setStartYear(e.target.value)} />
+            <span>—</span>
+            <select value={endEraId} onChange={e => setEndEraId(e.target.value)}>
+              {eras.map(era => <option key={era.id} value={era.id}>{era.name}</option>)}
+            </select>
+            <input type="number" placeholder="结束年" value={endYear} onChange={e => setEndYear(e.target.value)} />
+          </div>
+        </div>
+        
+        <div className="modal-actions">
+          <button className="btn-cancel" onClick={onClose}>取消</button>
+          <button className="btn-save" onClick={handleSave} disabled={!name.trim()}>创建</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// 时间轴+菜单
+const TimelineAddMenu = ({ isOpen, onClose, onAddEvent, onAddYear, onAddEra, onManageSubTimelines, onReorder, isReordering }) => {
+  if (!isOpen) return null;
+  return (
+    <>
+      <div className="add-menu-overlay" onClick={onClose} />
+      <div className="add-menu timeline-add-menu">
+        <div className="add-menu-item" onClick={() => { onAddEvent(); onClose(); }}>
+          <span className="menu-icon">📌</span>
+          <span>添加事件</span>
+        </div>
+        <div className="add-menu-item" onClick={() => { onAddYear(); onClose(); }}>
+          <span className="menu-icon">📆</span>
+          <span>添加年份</span>
+        </div>
+        <div className="add-menu-item" onClick={() => { onAddEra(); onClose(); }}>
+          <span className="menu-icon">📅</span>
+          <span>添加纪年</span>
+        </div>
+        <div className="add-menu-item" onClick={() => { onManageSubTimelines(); onClose(); }}>
+          <span className="menu-icon">📜</span>
+          <span>子时间轴</span>
+        </div>
+        <div className={`add-menu-item ${isReordering ? 'active' : ''}`} onClick={() => { onReorder(); onClose(); }}>
+          <span className="menu-icon">↕️</span>
+          <span>{isReordering ? '完成排序' : '调整顺序'}</span>
+        </div>
+      </div>
+    </>
+  );
+};
+
+// 子时间轴列表页
+const SubTimelineListPage = ({ isOpen, onClose, subTimelines, eras, onSelect, onAdd, onDelete }) => {
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  
+  if (!isOpen) return null;
+  
+  const getEraName = (eraId) => eras.find(e => e.id === eraId)?.name || '';
+  
+  const handleDelete = (st, e) => {
+    e.stopPropagation();
+    setConfirmDelete(st);
+  };
+  
+  return (
+    <div className="sub-timeline-page">
+      <div className="sub-timeline-header">
+        <button className="back-btn" onClick={onClose}>←</button>
+        <h2>子时间轴</h2>
+        <button className="add-btn" onClick={onAdd}>+</button>
+      </div>
+      <div className="sub-timeline-list">
+        {subTimelines.length === 0 ? (
+          <div className="empty-hint">
+            <span>📜</span>
+            <p>还没有子时间轴</p>
+            <p>子轴可以记录某个角色或事件线的专属时间线</p>
+          </div>
+        ) : (
+          subTimelines.map(st => (
+            <div key={st.id} className="sub-timeline-card" onClick={() => onSelect(st)}>
+              <span className="st-icon">{st.icon || '📜'}</span>
+              <div className="st-info">
+                <h3>{st.name}</h3>
+                {st.rangeStart && st.rangeEnd && (
+                  <p>{getEraName(st.rangeStart.eraId)}{st.rangeStart.year}年 — {getEraName(st.rangeEnd.eraId)}{st.rangeEnd.year}年</p>
+                )}
+              </div>
+              <button className="st-delete" onClick={(e) => handleDelete(st, e)}>×</button>
+            </div>
+          ))
+        )}
+      </div>
+      
+      {confirmDelete && (
+        <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
+          <div className="modal-content confirm-modal" onClick={e => e.stopPropagation()}>
+            <h3>删除子时间轴</h3>
+            <p>确定要删除「{confirmDelete.name}」吗？</p>
+            <p className="warning">该子轴下的专属事件将失去归属，但不会被删除</p>
+            <div className="modal-actions">
+              <button className="btn-cancel" onClick={() => setConfirmDelete(null)}>取消</button>
+              <button className="btn-delete" onClick={() => { onDelete(confirmDelete.id); setConfirmDelete(null); }}>删除</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// 时间轴主视图
+const TimelineView = ({ 
+  entry, 
+  onAddEvent, 
+  onEditEvent, 
+  onDeleteEvent,
+  onAddYear,
+  onEditYear,
+  onDeleteYear,
+  onAddEra, 
+  onEditEra, 
+  onDeleteEra,
+  expandedYears, 
+  onToggleYear, 
+  allTitlesMap, 
+  onLinkClick,
+  currentSubTimeline,
+  onExitSubTimeline,
+  isReordering,
+  onReorderEvent
+}) => {
+  const config = entry.timelineConfig || { eras: [], years: [], events: [], subTimelines: [] };
+  const eras = config.eras || [];
+  const allYears = config.years || [];
+  const allEvents = config.events || [];
+  
+  // 根据当前视图过滤事件
+  const events = currentSubTimeline 
+    ? allEvents.filter(e => e.subTimelineId === currentSubTimeline.id || e.showOnMain)
+    : allEvents.filter(e => !e.subTimelineId || e.showOnMain);
+  
+  // 按order排序
+  const sortedEras = [...eras].sort((a, b) => (a.order || 0) - (b.order || 0));
+  
+  // 获取某纪年下的年份列表
+  const getYearsForEra = (eraId) => {
+    return allYears
+      .filter(y => y.eraId === eraId)
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
+  };
+  
+  // 获取某年份下的事件列表
+  const getEventsForYear = (yearId) => {
+    return events
+      .filter(e => e.yearId === yearId)
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
+  };
+  
+  // 渲染事件内容（支持【】链接）
+  const renderEventContent = (content) => {
+    const parts = content.split(/(【[^】]+】)/g);
+    return parts.map((part, i) => {
+      const match = part.match(/【([^】]+)】/);
+      if (match) {
+        const keyword = match[1];
+        const targets = allTitlesMap?.get?.(keyword);
+        if (targets?.length) {
+          return <span key={i} className="event-link" onClick={(e) => { e.stopPropagation(); onLinkClick(keyword, targets[0].bookId, targets[0].entry.id); }}>【{keyword}】</span>;
+        }
+        return <span key={i} className="event-link broken">【{keyword}】</span>;
+      }
+      return part;
+    });
+  };
+  
+  // 长按事件
+  const [eventContextMenu, setEventContextMenu] = useState({ show: false, event: null, x: 0, y: 0 });
+  const eventLongPress = useRef(null);
+  
+  const handleEventLongPress = (e, event) => {
+    if (isReordering) return;
+    const touch = e.touches?.[0] || e;
+    eventLongPress.current = setTimeout(() => {
+      if (navigator.vibrate) navigator.vibrate(30);
+      setEventContextMenu({ show: true, event, x: touch.clientX, y: touch.clientY });
+    }, 500);
+  };
+  
+  const clearEventLongPress = () => {
+    if (eventLongPress.current) {
+      clearTimeout(eventLongPress.current);
+      eventLongPress.current = null;
+    }
+  };
+  
+  // 长按纪年
+  const [eraContextMenu, setEraContextMenu] = useState({ show: false, era: null, x: 0, y: 0 });
+  const eraLongPress = useRef(null);
+  
+  const handleEraLongPress = (e, era) => {
+    if (isReordering) return;
+    const touch = e.touches?.[0] || e;
+    eraLongPress.current = setTimeout(() => {
+      if (navigator.vibrate) navigator.vibrate(30);
+      setEraContextMenu({ show: true, era, x: touch.clientX, y: touch.clientY });
+    }, 500);
+  };
+  
+  const clearEraLongPress = () => {
+    if (eraLongPress.current) {
+      clearTimeout(eraLongPress.current);
+      eraLongPress.current = null;
+    }
+  };
+  
+  // 长按年份
+  const [yearContextMenu, setYearContextMenu] = useState({ show: false, year: null, x: 0, y: 0 });
+  const yearLongPress = useRef(null);
+  
+  const handleYearLongPress = (e, year) => {
+    if (isReordering) return;
+    const touch = e.touches?.[0] || e;
+    yearLongPress.current = setTimeout(() => {
+      if (navigator.vibrate) navigator.vibrate(30);
+      setYearContextMenu({ show: true, year, x: touch.clientX, y: touch.clientY });
+    }, 500);
+  };
+  
+  const clearYearLongPress = () => {
+    if (yearLongPress.current) {
+      clearTimeout(yearLongPress.current);
+      yearLongPress.current = null;
+    }
+  };
+  
+  // 拖拽排序
+  const dragItem = useRef(null);
+  const dragOverItem = useRef(null);
+  
+  const handleDragStart = (e, event) => {
+    dragItem.current = event;
+    e.target.style.opacity = '0.5';
+  };
+  
+  const handleDragEnd = (e) => {
+    e.target.style.opacity = '1';
+    if (dragItem.current && dragOverItem.current && dragItem.current.id !== dragOverItem.current.id) {
+      onReorderEvent(dragItem.current.id, dragOverItem.current.id);
+    }
+    dragItem.current = null;
+    dragOverItem.current = null;
+  };
+  
+  const handleDragOver = (e, event) => {
+    e.preventDefault();
+    dragOverItem.current = event;
+  };
+  
+  if (eras.length === 0) {
+    return (
+      <div className="timeline-empty">
+        <span>📅</span>
+        <h3>开始你的编年史</h3>
+        <p>首先创建一个纪年来开始记录时间</p>
+        <button onClick={onAddEra}>+ 创建纪年</button>
+      </div>
+    );
+  }
+  
+  return (
+    <div className={`timeline-view ${isReordering ? 'reordering' : ''}`}>
+      {currentSubTimeline && (
+        <div className="sub-timeline-banner">
+          <span>{currentSubTimeline.icon}</span>
+          <span>{currentSubTimeline.name}</span>
+          <button onClick={onExitSubTimeline}>返回主轴</button>
+        </div>
+      )}
+      
+      {isReordering && (
+        <div className="reorder-hint">拖拽事件卡片调整顺序</div>
+      )}
+      
+      <div className="timeline-content">
+        {sortedEras.map((era, eraIndex) => {
+          const eraYears = getYearsForEra(era.id);
+          
+          return (
+            <div key={era.id} className="timeline-era">
+              {eraIndex > 0 && era.gapFromPrevious > 0 && (
+                <div className="era-gap">
+                  <span>间隔 {era.gapFromPrevious} 年</span>
+                </div>
+              )}
+              
+              <div 
+                className="era-header"
+                onTouchStart={(e) => handleEraLongPress(e, era)}
+                onTouchEnd={clearEraLongPress}
+                onTouchMove={clearEraLongPress}
+              >
+                <div className="era-name">{era.name}</div>
+              </div>
+              
+              <div className="timeline-track">
+                {eraYears.length === 0 ? (
+                  <div className="no-events-hint">
+                    <p className="hint-text">该纪年还没有年份</p>
+                    <button className="add-first-event" onClick={() => onAddYear(era.id)}>+ 添加第一个年份</button>
+                  </div>
+                ) : (
+                  eraYears.map((year, yearIndex) => {
+                    const yearEvents = getEventsForYear(year.id);
+                    const isExpanded = expandedYears.has(year.id);
+                    
+                    return (
+                      <React.Fragment key={year.id}>
+                        {yearIndex > 0 && year.gapLabel && (
+                          <div className="year-gap">
+                            <span>── {year.gapLabel} ──</span>
+                          </div>
+                        )}
+                        
+                        <div className="year-node">
+                          <div 
+                            className="year-marker"
+                            onClick={() => yearEvents.length > 1 && onToggleYear(year.id)}
+                            onTouchStart={(e) => handleYearLongPress(e, year)}
+                            onTouchEnd={clearYearLongPress}
+                            onTouchMove={clearYearLongPress}
+                          >
+                            <span className="node-dot">○</span>
+                            <span className="node-year">{year.label}</span>
+                            {yearEvents.length > 1 && (
+                              <span className="event-count">
+                                {isExpanded ? '▲' : `${yearEvents.length}个事件 ▼`}
+                              </span>
+                            )}
+                          </div>
+                          
+                          <div className="year-events">
+                            {yearEvents.length === 0 ? (
+                              <button className="add-event-btn" onClick={() => onAddEvent(year.id)}>
+                                + 添加事件
+                              </button>
+                            ) : (yearEvents.length === 1 || isExpanded) ? (
+                              yearEvents.map(event => (
+                                <div 
+                                  key={event.id} 
+                                  className={`event-item ${isReordering ? 'draggable' : ''}`}
+                                  draggable={isReordering}
+                                  onDragStart={(e) => handleDragStart(e, event)}
+                                  onDragEnd={handleDragEnd}
+                                  onDragOver={(e) => handleDragOver(e, event)}
+                                  onTouchStart={(e) => handleEventLongPress(e, event)}
+                                  onTouchEnd={clearEventLongPress}
+                                  onTouchMove={clearEventLongPress}
+                                >
+                                  {isReordering && <span className="drag-handle">⋮⋮</span>}
+                                  {event.month && (
+                                    <span className="event-time">
+                                      {era.monthNames?.[event.month - 1] || `${event.month}月`}
+                                      {event.day && ` ${event.day}日`}
+                                    </span>
+                                  )}
+                                  <span className="event-content">{renderEventContent(event.content)}</span>
+                                  {event.subTimelineId && <span className="from-sub">📜</span>}
+                                </div>
+                              ))
+                            ) : (
+                              <div className="events-collapsed" onClick={() => onToggleYear(year.id)}>
+                                <span className="first-event">{renderEventContent(yearEvents[0].content)}</span>
+                                <span className="more-hint">...点击展开</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </React.Fragment>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      
+      {/* 事件长按菜单 */}
+      {eventContextMenu.show && (
+        <>
+          <div className="context-overlay" onClick={() => setEventContextMenu({ show: false })} />
+          <div 
+            className="context-menu"
+            style={{ top: eventContextMenu.y, left: Math.min(eventContextMenu.x, window.innerWidth - 150) }}
+          >
+            <div className="context-item" onClick={() => { onEditEvent(eventContextMenu.event); setEventContextMenu({ show: false }); }}>
+              <span className="context-icon">✏️</span>编辑
+            </div>
+            <div className="context-item danger" onClick={() => { onDeleteEvent(eventContextMenu.event.id); setEventContextMenu({ show: false }); }}>
+              <span className="context-icon">🗑️</span>删除
+            </div>
+          </div>
+        </>
+      )}
+      
+      {/* 纪年长按菜单 */}
+      {eraContextMenu.show && (
+        <>
+          <div className="context-overlay" onClick={() => setEraContextMenu({ show: false })} />
+          <div 
+            className="context-menu"
+            style={{ top: eraContextMenu.y, left: Math.min(eraContextMenu.x, window.innerWidth - 150) }}
+          >
+            <div className="context-item" onClick={() => { onEditEra(eraContextMenu.era); setEraContextMenu({ show: false }); }}>
+              <span className="context-icon">✏️</span>编辑纪年
+            </div>
+            <div className="context-item danger" onClick={() => { onDeleteEra(eraContextMenu.era.id); setEraContextMenu({ show: false }); }}>
+              <span className="context-icon">🗑️</span>删除纪年
+            </div>
+          </div>
+        </>
+      )}
+      
+      {/* 年份长按菜单 */}
+      {yearContextMenu.show && (
+        <>
+          <div className="context-overlay" onClick={() => setYearContextMenu({ show: false })} />
+          <div 
+            className="context-menu"
+            style={{ top: yearContextMenu.y, left: Math.min(yearContextMenu.x, window.innerWidth - 150) }}
+          >
+            <div className="context-item" onClick={() => { onEditYear(yearContextMenu.year); setYearContextMenu({ show: false }); }}>
+              <span className="context-icon">✏️</span>编辑年份
+            </div>
+            <div className="context-item danger" onClick={() => { onDeleteYear(yearContextMenu.year.id); setYearContextMenu({ show: false }); }}>
+              <span className="context-icon">🗑️</span>删除年份
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+// ============ 时间轴模式组件结束 ============
+
 const findEntryPath = (es, tid, p = []) => { for (const e of es) { const cp = [...p, e]; if (e.id === tid) return cp; if (e.children?.length) { const f = findEntryPath(e.children, tid, cp); if (f) return f; } } return null; };
 const findEntryById = (es, id) => { for (const e of es) { if (e.id === id) return e; if (e.children?.length) { const f = findEntryById(e.children, id); if (f) return f; } } return null; };
 const getAllChildContent = (e, all) => { let r = []; const c = (x) => { if (!x) return; if (x.content || !x.isFolder) r.push(x); if (x.children?.length) x.children.forEach(ch => c(findEntryById(all, ch.id) || ch)); }; if (e?.children?.length) e.children.forEach(ch => c(findEntryById(all, ch.id) || ch)); return r; };
@@ -2754,6 +3560,20 @@ export default function App() {
   const [showCharacterDetail, setShowCharacterDetail] = useState(null);
   const [showRelationNetwork, setShowRelationNetwork] = useState(false);
   const [showCharacterAddMenu, setShowCharacterAddMenu] = useState(false);
+  // 时间轴模式状态
+  const [showTimelineSettings, setShowTimelineSettings] = useState(false);
+  const [showAddEventModal, setShowAddEventModal] = useState(false);
+  const [showSubTimelines, setShowSubTimelines] = useState(false);
+  const [currentSubTimeline, setCurrentSubTimeline] = useState(null);
+  const [expandedYears, setExpandedYears] = useState(new Set());
+  const [editingEvent, setEditingEvent] = useState(null);
+  const [showTimelineAddMenu, setShowTimelineAddMenu] = useState(false);
+  const [showAddSubTimelineModal, setShowAddSubTimelineModal] = useState(false);
+  const [showAddEraModal, setShowAddEraModal] = useState(false);
+  const [editingEra, setEditingEra] = useState(null);
+  const [showAddYearModal, setShowAddYearModal] = useState(false);
+  const [editingYear, setEditingYear] = useState(null);
+  const [isTimelineReordering, setIsTimelineReordering] = useState(false);
   // 书籍排序相关
   const [isBookReorderMode, setIsBookReorderMode] = useState(false);
   const [draggingBookId, setDraggingBookId] = useState(null);
@@ -3314,20 +4134,28 @@ export default function App() {
         ];
         // 如果是文件夹，添加正文模式和人设模式选项
         if (item.isFolder) {
-          // 正文模式（与人设模式互斥）
-          if (!item.characterMode) {
+          // 正文模式（与人设模式和时间轴模式互斥）
+          if (!item.characterMode && !item.timelineMode) {
             opts.push({ 
               icon: item.novelMode ? '📝' : '📖', 
               label: item.novelMode ? '关闭正文模式' : '开启正文模式', 
               action: () => setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, item.id, { novelMode: !item.novelMode }) } : b) })) 
             });
           }
-          // 人设模式（与正文模式互斥）
-          if (!item.novelMode) {
+          // 人设模式（与正文模式和时间轴模式互斥）
+          if (!item.novelMode && !item.timelineMode) {
             opts.push({ 
               icon: item.characterMode ? '📝' : '👤', 
               label: item.characterMode ? '关闭人设模式' : '开启人设模式', 
               action: () => setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, item.id, { characterMode: !item.characterMode, characterRelations: item.characterRelations || [] }) } : b) })) 
+            });
+          }
+          // 时间轴模式（与正文模式和人设模式互斥）
+          if (!item.novelMode && !item.characterMode) {
+            opts.push({ 
+              icon: item.timelineMode ? '📝' : '📅', 
+              label: item.timelineMode ? '关闭时间轴模式' : '开启时间轴模式', 
+              action: () => setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, item.id, { timelineMode: !item.timelineMode, timelineConfig: item.timelineConfig || { eras: [], events: [], subTimelines: [] } }) } : b) })) 
             });
           }
         }
@@ -3358,6 +4186,9 @@ export default function App() {
       } else if (e.characterMode) {
         // 人设模式
         setViewMode('character');
+      } else if (e.timelineMode) {
+        // 时间轴模式
+        setViewMode('timeline');
       } else {
         setViewMode('list');
       }
@@ -4037,6 +4868,281 @@ export default function App() {
   
   // ============ 人设模式函数结束 ============
 
+  // ============ 时间轴模式函数 ============
+  
+  // 添加纪年
+  const handleAddEra = (eraData) => {
+    if (!currentEntry?.timelineMode) return;
+    
+    const config = currentEntry.timelineConfig || { eras: [], years: [], events: [], subTimelines: [] };
+    const newEras = [...(config.eras || []), eraData];
+    
+    // 同时创建第一个年份
+    const firstYear = {
+      id: generateId(),
+      eraId: eraData.id,
+      label: eraData.startLabel || '1年',
+      gapLabel: null,
+      order: Date.now(),
+      createdAt: Date.now()
+    };
+    const newYears = [...(config.years || []), firstYear];
+    
+    setData(prev => ({
+      ...prev,
+      books: prev.books.map(b => b.id === currentBook.id ? {
+        ...b,
+        entries: updateEntryInTree(b.entries, currentEntry.id, {
+          timelineConfig: { ...config, eras: newEras, years: newYears }
+        })
+      } : b)
+    }));
+  };
+  
+  // 更新纪年
+  const handleUpdateEra = (eraData) => {
+    if (!currentEntry?.timelineMode) return;
+    
+    const config = currentEntry.timelineConfig || { eras: [], years: [], events: [], subTimelines: [] };
+    const newEras = (config.eras || []).map(e => e.id === eraData.id ? eraData : e);
+    
+    setData(prev => ({
+      ...prev,
+      books: prev.books.map(b => b.id === currentBook.id ? {
+        ...b,
+        entries: updateEntryInTree(b.entries, currentEntry.id, {
+          timelineConfig: { ...config, eras: newEras }
+        })
+      } : b)
+    }));
+    setEditingEra(null);
+  };
+  
+  // 删除纪年
+  const handleDeleteEra = (eraId) => {
+    if (!currentEntry?.timelineMode) return;
+    
+    const config = currentEntry.timelineConfig || { eras: [], years: [], events: [], subTimelines: [] };
+    const newEras = (config.eras || []).filter(e => e.id !== eraId);
+    // 获取该纪年下的所有年份ID
+    const yearIdsToDelete = (config.years || []).filter(y => y.eraId === eraId).map(y => y.id);
+    // 删除该纪年下的年份
+    const newYears = (config.years || []).filter(y => y.eraId !== eraId);
+    // 删除这些年份下的所有事件
+    const newEvents = (config.events || []).filter(e => !yearIdsToDelete.includes(e.yearId));
+    
+    setData(prev => ({
+      ...prev,
+      books: prev.books.map(b => b.id === currentBook.id ? {
+        ...b,
+        entries: updateEntryInTree(b.entries, currentEntry.id, {
+          timelineConfig: { ...config, eras: newEras, years: newYears, events: newEvents }
+        })
+      } : b)
+    }));
+  };
+  
+  // 添加年份
+  const handleAddYear = (yearData) => {
+    if (!currentEntry?.timelineMode) return;
+    
+    const config = currentEntry.timelineConfig || { eras: [], years: [], events: [], subTimelines: [] };
+    const newYears = [...(config.years || []), yearData];
+    
+    setData(prev => ({
+      ...prev,
+      books: prev.books.map(b => b.id === currentBook.id ? {
+        ...b,
+        entries: updateEntryInTree(b.entries, currentEntry.id, {
+          timelineConfig: { ...config, years: newYears }
+        })
+      } : b)
+    }));
+  };
+  
+  // 更新年份
+  const handleUpdateYear = (yearData) => {
+    if (!currentEntry?.timelineMode) return;
+    
+    const config = currentEntry.timelineConfig || { eras: [], years: [], events: [], subTimelines: [] };
+    const newYears = (config.years || []).map(y => y.id === yearData.id ? yearData : y);
+    
+    setData(prev => ({
+      ...prev,
+      books: prev.books.map(b => b.id === currentBook.id ? {
+        ...b,
+        entries: updateEntryInTree(b.entries, currentEntry.id, {
+          timelineConfig: { ...config, years: newYears }
+        })
+      } : b)
+    }));
+    setEditingYear(null);
+  };
+  
+  // 删除年份
+  const handleDeleteYear = (yearId) => {
+    if (!currentEntry?.timelineMode) return;
+    
+    const config = currentEntry.timelineConfig || { eras: [], years: [], events: [], subTimelines: [] };
+    const newYears = (config.years || []).filter(y => y.id !== yearId);
+    // 删除该年份下的所有事件
+    const newEvents = (config.events || []).filter(e => e.yearId !== yearId);
+    
+    setData(prev => ({
+      ...prev,
+      books: prev.books.map(b => b.id === currentBook.id ? {
+        ...b,
+        entries: updateEntryInTree(b.entries, currentEntry.id, {
+          timelineConfig: { ...config, years: newYears, events: newEvents }
+        })
+      } : b)
+    }));
+  };
+  
+  // 添加事件
+  const handleAddTimelineEvent = (eventData) => {
+    if (!currentEntry?.timelineMode) return;
+    
+    const config = currentEntry.timelineConfig || { eras: [], events: [], subTimelines: [] };
+    const newEvents = [...(config.events || []), eventData];
+    
+    setData(prev => ({
+      ...prev,
+      books: prev.books.map(b => b.id === currentBook.id ? {
+        ...b,
+        entries: updateEntryInTree(b.entries, currentEntry.id, {
+          timelineConfig: { ...config, events: newEvents }
+        })
+      } : b)
+    }));
+  };
+  
+  // 更新事件
+  const handleUpdateTimelineEvent = (eventData) => {
+    if (!currentEntry?.timelineMode) return;
+    
+    const config = currentEntry.timelineConfig || { eras: [], events: [], subTimelines: [] };
+    const newEvents = (config.events || []).map(e => e.id === eventData.id ? eventData : e);
+    
+    setData(prev => ({
+      ...prev,
+      books: prev.books.map(b => b.id === currentBook.id ? {
+        ...b,
+        entries: updateEntryInTree(b.entries, currentEntry.id, {
+          timelineConfig: { ...config, events: newEvents }
+        })
+      } : b)
+    }));
+    setEditingEvent(null);
+  };
+  
+  // 删除事件
+  const handleDeleteTimelineEvent = (eventId) => {
+    if (!currentEntry?.timelineMode) return;
+    
+    const config = currentEntry.timelineConfig || { eras: [], events: [], subTimelines: [] };
+    const newEvents = (config.events || []).filter(e => e.id !== eventId);
+    
+    setData(prev => ({
+      ...prev,
+      books: prev.books.map(b => b.id === currentBook.id ? {
+        ...b,
+        entries: updateEntryInTree(b.entries, currentEntry.id, {
+          timelineConfig: { ...config, events: newEvents }
+        })
+      } : b)
+    }));
+  };
+  
+  // 重排事件顺序
+  const handleReorderEvent = (draggedId, targetId) => {
+    if (!currentEntry?.timelineMode) return;
+    
+    const config = currentEntry.timelineConfig || { eras: [], events: [], subTimelines: [] };
+    const events = [...(config.events || [])];
+    
+    const draggedIndex = events.findIndex(e => e.id === draggedId);
+    const targetIndex = events.findIndex(e => e.id === targetId);
+    
+    if (draggedIndex === -1 || targetIndex === -1) return;
+    
+    // 移动事件
+    const [draggedEvent] = events.splice(draggedIndex, 1);
+    events.splice(targetIndex, 0, draggedEvent);
+    
+    // 更新order
+    const newEvents = events.map((e, i) => ({ ...e, order: i * 1000 }));
+    
+    setData(prev => ({
+      ...prev,
+      books: prev.books.map(b => b.id === currentBook.id ? {
+        ...b,
+        entries: updateEntryInTree(b.entries, currentEntry.id, {
+          timelineConfig: { ...config, events: newEvents }
+        })
+      } : b)
+    }));
+  };
+  
+  // 添加子时间轴
+  const handleAddSubTimeline = (subTimelineData) => {
+    if (!currentEntry?.timelineMode) return;
+    
+    const config = currentEntry.timelineConfig || { eras: [], events: [], subTimelines: [] };
+    const newSubTimelines = [...(config.subTimelines || []), subTimelineData];
+    
+    setData(prev => ({
+      ...prev,
+      books: prev.books.map(b => b.id === currentBook.id ? {
+        ...b,
+        entries: updateEntryInTree(b.entries, currentEntry.id, {
+          timelineConfig: { ...config, subTimelines: newSubTimelines }
+        })
+      } : b)
+    }));
+  };
+  
+  // 删除子时间轴
+  const handleDeleteSubTimeline = (subTimelineId) => {
+    if (!currentEntry?.timelineMode) return;
+    
+    const config = currentEntry.timelineConfig || { eras: [], events: [], subTimelines: [] };
+    const newSubTimelines = (config.subTimelines || []).filter(st => st.id !== subTimelineId);
+    // 同时清除事件中对该子轴的引用
+    const newEvents = (config.events || []).map(e => 
+      e.subTimelineId === subTimelineId ? { ...e, subTimelineId: null } : e
+    );
+    
+    setData(prev => ({
+      ...prev,
+      books: prev.books.map(b => b.id === currentBook.id ? {
+        ...b,
+        entries: updateEntryInTree(b.entries, currentEntry.id, {
+          timelineConfig: { ...config, subTimelines: newSubTimelines, events: newEvents }
+        })
+      } : b)
+    }));
+    
+    if (currentSubTimeline?.id === subTimelineId) {
+      setCurrentSubTimeline(null);
+    }
+  };
+  
+  // 切换年份展开
+  const handleToggleYear = (yearKey) => {
+    setExpandedYears(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(yearKey)) {
+        newSet.delete(yearKey);
+      } else {
+        newSet.add(yearKey);
+      }
+      return newSet;
+    });
+  };
+  
+  // ============ 时间轴模式函数结束 ============
+
   // 上传图片到画廊
   const uploadGalleryImage = async (e) => {
     const files = e.target.files;
@@ -4343,7 +5449,7 @@ export default function App() {
   }}>{pages.map((pageBooks, pageIndex) => (<div key={pageIndex} className="bookshelf-page"><div className="bookshelf-grid">{pageBooks.map((b, bookIndexInPage) => { const globalIndex = pageIndex * booksPerPage + bookIndexInPage; return b.isAddButton ? (<div key="add" className="book-card add-book" onClick={() => { setEditingBook(null); setShowBookModal(true); }}><div className="book-cover"><span className="add-icon">+</span></div><div className="book-meta"><h2>新建世界</h2></div></div>) : (<div key={b.id} className={`book-card ${isBookReorderMode && draggingBookId === b.id ? 'dragging' : ''} ${isBookReorderMode ? 'reorder-mode' : ''}`} style={{ '--book-color': b.color || '#8B7355' }} onClick={() => !isBookReorderMode && handleBookSelect(b)} onTouchStart={e => { e.stopPropagation(); if (!isVisiting && !isBookReorderMode) handleLongPressStart(e, 'book', b); }} onTouchEnd={!isVisiting ? handleLongPressEnd : undefined} onTouchMove={!isVisiting ? handleLongPressEnd : undefined}><div className="book-spine" /><div className="book-cover">{b.coverImage ? <img src={b.coverImage} alt="" className="cover-image" /> : <span className="book-emoji">{b.cover}</span>}</div><div className="book-shadow" /><div className="book-meta"><h2>{b.title}</h2>{b.author && <p>{b.author} 著</p>}</div>{isBookReorderMode && draggingBookId !== b.id && (<div className="book-drop-zone" onClick={(e) => { e.stopPropagation(); handleMoveBook(draggingBookId, globalIndex); }}>放这里</div>)}</div>); })}</div></div>))}</div>{isVisiting && <div className="return-hint">↓ 轻触星球返航 ↓</div>}{totalPages > 1 && (<div className="shelf-page-dots">{pages.map((_, i) => (<span key={i} className={`shelf-dot ${shelfPage === i ? 'active' : ''}`} onClick={() => { shelfRef.current?.scrollTo({ left: i * shelfRef.current.clientWidth, behavior: 'smooth' }); }} />))}</div>)}<BookModal isOpen={showBookModal} onClose={() => { setShowBookModal(false); setEditingBook(null); }} onSave={handleAddBook} editingBook={editingBook} /><ContextMenu isOpen={contextMenu.isOpen} position={contextMenu.position} onClose={() => setContextMenu({ ...contextMenu, isOpen: false })} options={contextMenu.options} /><ConfirmModal isOpen={confirmModal.isOpen} title={confirmModal.title} message={confirmModal.message} onConfirm={confirmModal.onConfirm} onCancel={() => setConfirmModal({ isOpen: false })} /><SearchModal isOpen={showSearch} onClose={() => { setShowSearch(false); setSearchQuery(''); setSearchResults([]); }} query={searchQuery} setQuery={setSearchQuery} results={searchResults} onSearch={performSearch} onResultClick={handleSearchResultClick} />{showProfile && (<div className={`profile-page ${profileClosing ? 'closing' : ''}`} style={userBg ? { backgroundImage: `url(${userBg})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}}><div className="profile-bg-overlay" /><div className="profile-header"><button className="profile-close" onClick={closeProfile}>×</button><div className="profile-avatar" onClick={() => avatarUploadRef.current?.click()}>{userAvatar ? <img src={userAvatar} alt="" /> : '✨'}</div><input ref={avatarUploadRef} type="file" accept="image/*" onChange={handleAvatarUpload} style={{ display: 'none' }} /><input type="text" className="profile-name" value={userName} onChange={e => saveUserName(e.target.value)} placeholder="点击编辑名字" /><input type="text" className="profile-shelf-title" value={userShelfTitle} onChange={e => saveShelfTitle(e.target.value)} placeholder="自定义书架标题（访客可见）" /><textarea className="profile-bio" value={userBio} onChange={e => saveUserBio(e.target.value)} placeholder="写一句简介..." rows={2} /></div><div className="profile-stats"><div className="stat-item"><span className="stat-number">{totalStats.books}</span><span className="stat-label">作品</span></div><div className="stat-item"><span className="stat-number">{totalStats.entries}</span><span className="stat-label">词条</span></div><div className="stat-item"><span className="stat-number">{totalStats.words.toLocaleString()}</span><span className="stat-label">总字数</span></div></div><div className="profile-menu"><div className="profile-menu-item" onClick={closeProfile}><span>📚</span><span>我的书架</span><span className="menu-arrow">›</span></div><div className="profile-menu-item" onClick={() => setShowLibrary(true)}><span>📖</span><span>图书馆 ({library.books.length})</span><span className="menu-arrow">›</span></div><div className="profile-menu-item" onClick={() => setShowTotalGallery(true)}><span>🖼️</span><span>画廊 ({totalStats.images})</span><span className="menu-arrow">›</span></div><div className="profile-menu-item" onClick={() => bgUploadRef.current?.click()}><span>🎨</span><span>更换背景</span><span className="menu-arrow">›</span></div><input ref={bgUploadRef} type="file" accept="image/*" onChange={handleBgUpload} style={{ display: 'none' }} /><div className="profile-menu-item" onClick={() => setShowSettings(true)}><span>⚙️</span><span>设置</span><span className="menu-arrow">›</span></div><div className="profile-menu-item"><span>💡</span><span>关于一页穹顶</span><span className="menu-arrow">›</span></div></div><div className="profile-bottom-bar"><div className="profile-account-status">{user ? (<div className="logged-in"><span className="sync-indicator" data-status={syncStatus}></span><span>{user.email}</span></div>) : (<button className="login-btn" onClick={() => { setShowAuthModal(true); setAuthMode('login'); }}>登录 / 注册</button>)}</div><div className="profile-version">一页穹顶 v1.0</div></div></div>)}{showTotalGallery && (<div className={`total-gallery-page ${galleryClosing ? "closing" : ""}`}><div className="gallery-header"><button className="gallery-back" onClick={closeGallery}>←</button><h2>画廊</h2><span></span></div><div className="total-gallery-list">{data.books.filter(b => b.gallery?.enabled).map(book => (<div key={book.id} className="total-gallery-book"><div className="total-gallery-book-header" onClick={() => { setCurrentBook(book); setShowTotalGallery(false); closeProfile(); setTimeout(() => setShowGallery(true), 300); }}><span className="book-icon">{book.coverImage ? <img src={book.coverImage} alt="" /> : book.cover}</span><span className="book-title">{book.title}</span><span className="book-count">{book.gallery.images?.length || 0}张</span></div><div className="total-gallery-book-images">{book.gallery.images?.slice(0, 3).map(img => (<div key={img.id} className="total-gallery-thumb" onClick={() => { setCurrentBook(book); setShowTotalGallery(false); closeProfile(); setTimeout(() => setShowGallery(true), 300); }}><img src={img.src} alt="" /></div>))}<label className="total-gallery-add-btn"><input type="file" accept="image/*" multiple onChange={(e) => { const files = e.target.files; if (!files?.length) return; Array.from(files).forEach(file => { const reader = new FileReader(); reader.onload = (ev) => { const newImg = { id: Date.now().toString() + Math.random(), src: ev.target.result, featured: false }; setData(prev => ({ ...prev, books: prev.books.map(b => b.id === book.id ? { ...b, gallery: { ...b.gallery, images: [...(b.gallery.images || []), newImg] } } : b) })); }; reader.readAsDataURL(file); }); e.target.value = ''; }} style={{ display: 'none' }} /><span>+</span></label></div></div>))}{data.books.filter(b => b.gallery?.enabled).length === 0 && (<div className="gallery-empty"><span>🖼️</span><p>还没有任何画廊</p><p>在书籍中开启画廊功能</p></div>)}</div></div>)}{showLibrary && (<div className={`library-page ${libraryClosing ? "closing" : ""}`}><div className="library-header"><button className="library-back" onClick={closeLibrary}>←</button><h2>图书馆</h2><label className="library-import-btn">{importLoading ? '导入中...' : '📥 导入'}<input ref={libraryUploadRef} type="file" accept=".txt,.epub" onChange={handleImportBook} style={{ display: 'none' }} disabled={importLoading} /></label></div><div className="library-hint">支持导入 txt、epub 格式的电子书</div><div className="library-list">{library.books.map(book => (<div key={book.id} className="library-book-item"><div className="library-book-cover">{book.type === 'epub' ? '📕' : '📄'}{book.bookmark && <span className="library-bookmark-badge">🔖</span>}</div><div className="library-book-info" onClick={() => openLibraryBook(book)}><h3>{book.title}</h3><p>{book.author} · {book.chapters.length}章</p><p className="library-book-time">{new Date(book.importTime).toLocaleDateString()}{book.bookmark && ` · 已读至第${book.bookmark.chapterIndex + 1}章`}</p></div><button className="library-book-delete" onClick={(e) => { e.stopPropagation(); handleDeleteLibraryBook(book.id, book.title); }}>🗑️</button></div>))}{library.books.length === 0 && (<div className="library-empty"><span>📚</span><p>图书馆空空如也</p><p>点击右上角导入电子书</p></div>)}</div><ConfirmModal isOpen={confirmModal.isOpen} title={confirmModal.title} message={confirmModal.message} onConfirm={confirmModal.onConfirm} onCancel={() => setConfirmModal({ isOpen: false })} /></div>)}{showLibraryReader && libraryBook && (<StoryReader book={{ title: libraryBook.title }} chapter={libraryBook.chapters[libraryChapterIndex]} novelModeEntry={null} allChapters={libraryBook.chapters} currentChapterIndex={libraryChapterIndex} onClose={() => setShowLibraryReader(false)} onChangeChapter={(ch) => { const idx = libraryBook.chapters.findIndex(c => c.id === ch.id); if (idx >= 0) setLibraryChapterIndex(idx); }} onEdit={() => {}} settings={storySettings} onChangeSettings={setStorySettings} isLibraryMode={true} isBookmarked={libraryBook.bookmark !== null} onToggleBookmark={toggleLibraryBookmark} initialPage={libraryBook.bookmark?.page || 0} />)}<AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} mode={authMode} setMode={setAuthMode} showToast={showToast} />{showRocketModal && (<RocketModal isOpen={showRocketModal} onClose={() => setShowRocketModal(false)} onFly={flyToCoordinate} showToast={showToast} onLaunchStart={() => setLaunchAnimating('up')} />)}<SettingsPage isOpen={showSettings} isClosing={settingsClosing} onClose={closeSettings} user={user} onLogout={async () => { await supabase.auth.signOut(); closeSettings(); }} myInviteCode={myInviteCode} onGenerateCode={generateInviteCode} onResetCode={resetInviteCode} formatCoordinate={formatCoordinate} syncStatus={syncStatus} lastSyncTime={lastSyncTime} onSyncNow={() => { saveToCloud(data); }} showRocketBtn={showRocketBtn} onToggleRocketBtn={toggleRocketBtn} showToast={showToast} characterCardStyle={characterCardStyle} onChangeCardStyle={changeCardStyle} />{showReturnConfirm && (<div className="return-confirm-overlay" onClick={() => setShowReturnConfirm(false)}><div className="return-confirm-modal" onClick={e => e.stopPropagation()}><div className="rocket-icon">🚀</div><h3>确认返航？</h3><p>即将返回你自己的书架</p><div className="return-confirm-actions"><button className="stay-btn" onClick={() => setShowReturnConfirm(false)}>再看看</button><button className="go-btn" onClick={confirmReturn}>返航</button></div></div></div>)}{toast.show && <div className="app-toast">{toast.message}</div>}<style>{styles}</style></div>);
 }
 
-  return (<div className="app main-view"><div className={`sidebar ${isSidebarOpen ? 'open' : ''}`}><div className="sidebar-header"><h2>{currentBook.title}</h2><button className="close-sidebar" onClick={() => setIsSidebarOpen(false)}>×</button></div><div className="sidebar-content">{currentBook.entries.map(e => <SidebarItem key={e.id} entry={e} onSelect={handleSidebarSelect} currentId={currentEntry?.id} expandedIds={expandedIds} onToggle={id => setExpandedIds(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; })} />)}</div></div>{isSidebarOpen && <div className="sidebar-overlay" onClick={() => setIsSidebarOpen(false)} />}<div className="main-content" onTouchStart={e => { touchStartX.current = e.touches[0].clientX; touchStartY.current = e.touches[0].clientY; }} onTouchEnd={e => { const dx = e.changedTouches[0].clientX - touchStartX.current; const dy = e.changedTouches[0].clientY - touchStartY.current; if (dx > 120 && Math.abs(dx) > Math.abs(dy) * 2) { if (currentEntry || navigationStack.length > 0) { handleBack(); } else { handleBackToShelf(); } } }}><header className="top-bar"><div className="top-left"><button className="icon-btn" onClick={() => setIsSidebarOpen(true)}>☰</button>{(currentEntry || navigationStack.length > 0) && <button className="icon-btn" onClick={handleBack}>←</button>}<button className="icon-btn" onClick={handleBackToShelf}>🏠</button></div><div className="breadcrumb">{isVisitingInBook && <span className="friend-view-badge">👤 {visitingProfile?.name}</span>}<span className="book-name">{currentBook.title}</span>{currentEntry && <><span className="separator">/</span><span className="current-title">{currentEntry.title}</span></>}</div><div className="top-right">{isVisitingInBook ? (<span className="readonly-indicator">只读</span>) : ((viewMode === 'single' || viewMode === 'merged') && (<div className="read-mode-toggle" onClick={() => { if (!isReadOnly) { const ed = document.querySelector('.rich-editor'); if (ed) ed.forceSave?.(); } else if (viewMode === 'merged' && liveEntry) { initMerged(liveEntry); } setIsReadOnly(!isReadOnly); }}><span className={`toggle-label ${isReadOnly ? 'active' : ''}`}>阅读</span><div className={`toggle-switch ${!isReadOnly ? 'edit-mode' : ''}`}><div className="toggle-knob" /></div><span className={`toggle-label ${!isReadOnly ? 'active' : ''}`}>编辑</span></div>))}</div></header>{!currentEntry && currentBook.showStats && (<div className="book-info-card" onClick={() => { if (!isVisitingInBook) { setEditingBook(currentBook); setShowBookModal(true); } }}><div className="info-cover">{currentBook.coverImage ? <img src={currentBook.coverImage} alt="" /> : <span>{currentBook.cover}</span>}</div><div className="info-details">{currentBook.author && <p>作者：{currentBook.author}</p>}{currentBook.tags?.length > 0 && <p>标签：{currentBook.tags.join('、')}</p>}<p>词条：{countEntries(currentBook.entries)}条</p><p>字数：{countWords(currentBook.entries).toLocaleString()}字</p></div>{!isVisitingInBook && <span className="info-edit-hint">点击编辑 ›</span>}</div>)}{!currentEntry && currentBook.gallery?.enabled && (<div className="gallery-preview-strip"><div className="gallery-preview-scroll">{currentBook.gallery.images?.filter(img => img.featured).map(img => (<div key={img.id} className="gallery-strip-item" onClick={() => openGalleryPreview(img)}><img src={img.src} alt="" /></div>))}{(!currentBook.gallery.images?.filter(img => img.featured).length) && !isVisitingInBook && (<div className="gallery-strip-empty" onClick={() => setShowGallery(true)}><span>+</span><p>添加展示图片</p></div>)}</div><button className="gallery-enter-btn" onClick={() => setShowGallery(true)}>进入画廊 ›</button></div>)}<main className={`content-area ${slideAnim}`}>{viewMode === 'list' && !isReorderMode && (<>{currentEntry && <div className="list-header"><h1>{currentEntry.title}</h1>{currentEntry.summary && <p className="summary">{currentEntry.summary}</p>}</div>}<p className="swipe-hint">{isVisitingInBook ? '💡 左滑合并视图 · 右滑返回' : '💡 左滑合并视图 · 右滑返回 · 长按编辑'}</p><div className="entry-list">{currentEntries.map(e => { let tx = 0; return (<div key={e.id} className="entry-card" onClick={() => handleEntryClick(e)} onTouchStart={ev => { tx = ev.touches[0].clientX; if (!isVisitingInBook) handleLongPressStart(ev, 'entry', e); }} onTouchMove={!isVisitingInBook ? handleLongPressEnd : undefined} onTouchEnd={ev => { if (!isVisitingInBook) handleLongPressEnd(); handleEntrySwipe(e, ev.changedTouches[0].clientX - tx); }}><div className="entry-icon">{e.characterMode ? '👤' : e.novelMode ? '📖' : e.isFolder ? '📁' : '📄'}</div><div className="entry-info"><h3>{e.title}{e.linkable && <span className="star-badge">⭐</span>}{e.novelMode && <span className="novel-badge">正文</span>}{e.characterMode && <span className="character-badge">人设</span>}</h3><p>{e.summary}</p></div><span className="entry-arrow">›</span></div>); })}</div>{currentEntries.length === 0 && <div className="empty-state"><span>✨</span><p>{isVisitingInBook ? '这里还没有内容' : '点击右下角添加'}</p></div>}</>)}{(viewMode === 'list' || viewMode === 'character') && isReorderMode && <ReorderList entries={currentEntries} onReorder={handleReorder} onExit={() => setIsReorderMode(false)} />}{viewMode === 'single' && liveEntry && (<div className="single-view"><div className="export-content" ref={exportRef}><div className="content-header">{effectiveReadOnly ? <h1>{liveEntry.title}</h1> : <input type="text" className="editable-title" defaultValue={liveEntry.title} onBlur={ev => handleTitleChange(liveEntry.id, liveEntry.title, ev.target.value)} key={currentEntry.id + '-title'} />}{effectiveReadOnly ? (liveEntry.summary && <p className="entry-summary">{liveEntry.summary}</p>) : <input type="text" className="editable-summary" defaultValue={liveEntry.summary || ''} placeholder="添加简介..." onBlur={ev => handleSummaryChange(liveEntry.id, ev.target.value)} key={currentEntry.id + '-summary'} />}</div><div onTouchStart={effectiveReadOnly ? handleContentLongPressStart : undefined} onTouchEnd={effectiveReadOnly ? handleContentLongPressEnd : undefined} onTouchMove={effectiveReadOnly ? handleContentLongPressEnd : undefined}>{effectiveReadOnly ? <ContentRenderer content={liveEntry.content} allTitlesMap={allTitlesMap} currentBookId={currentBook.id} onLinkClick={handleLinkClick} fontFamily={currentFont} /> : <RichEditor key={currentEntry.id} content={liveEntry.content} onSave={html => saveContent(html)} fontFamily={currentFont} onImageClick={handleImageClick} onResetFormats={() => setActiveFormats({ bold: false, italic: false, underline: false, strike: false, size: 'medium' })} />}</div></div><div className="word-count">{countSingleEntryWords(liveEntry.content).toLocaleString()} 字</div></div>)}{viewMode === 'merged' && currentEntry && (<div className="merged-view">{effectiveReadOnly ? (<div ref={exportRef}><div className="content-header merged-header"><h1>{currentEntry.title}</h1><p className="merged-hint">📖 合并视图</p></div><div className="merged-content-read" onTouchStart={handleContentLongPressStart} onTouchEnd={handleContentLongPressEnd} onTouchMove={handleContentLongPressEnd}>{liveChildContent.map((it, i, arr) => (<div key={it.id} className="merged-section"><div className="section-title">• {it.title}</div><ContentRenderer content={it.content} allTitlesMap={allTitlesMap} currentBookId={currentBook.id} onLinkClick={handleLinkClick} fontFamily={currentFont} />{i < arr.length - 1 && <div className="section-divider" />}</div>))}</div></div>) : (<><div className="content-header merged-header"><h1>{currentEntry.title}</h1><p className="merged-hint">📖 合并视图</p></div><div className="merged-content-edit">{mergedContents.map((it, i) => (<div key={it.id} className="merged-edit-section"><div className="merged-edit-header">• <input type="text" className="merged-title-input" defaultValue={it.title} onBlur={ev => handleMergedChange(i, 'title', ev.target.value)} key={it.id + '-title'} /></div><div className="merged-editor-wrap" contentEditable dangerouslySetInnerHTML={{ __html: it.content }} onBlur={ev => handleMergedChange(i, 'content', ev.target.innerHTML)} onPaste={ev => { ev.preventDefault(); const text = ev.clipboardData.getData('text/plain'); document.execCommand('insertText', false, text); }} style={{ fontFamily: currentFont }} /></div>))}<button className="add-merged-entry-btn" onClick={handleAddMerged}>+ 添加词条</button></div></>)}<div className="word-count">{liveChildContent.reduce((sum, it) => sum + countSingleEntryWords(it.content), 0).toLocaleString()} 字</div></div>)}{viewMode === 'character' && currentEntry && !isReorderMode && (<div className="character-view"><div className="character-header"><h1>{currentEntry.title}</h1><p className="character-hint">👤 人设模式 · {currentEntry.children?.length || 0} 位角色</p></div><div className="character-grid">{(currentEntry.children || []).map((char, idx) => (<CharacterCard key={char.id} entry={char} style={characterCardStyle} onClick={handleCharacterClick} onLongPress={!isVisitingInBook ? handleCharacterLongPress : undefined} index={idx} />))}{!isVisitingInBook && <AddCharacterCard style={characterCardStyle} onClick={() => { setEditingCharacter(null); setShowCharacterModal(true); }} />}</div>{currentEntry.children?.length === 0 && <div className="empty-state"><span>👤</span><p>还没有人设</p><p>点击「+」添加角色</p></div>}</div>)}{viewMode === 'novel' && liveEntry && (
+  return (<div className="app main-view"><div className={`sidebar ${isSidebarOpen ? 'open' : ''}`}><div className="sidebar-header"><h2>{currentBook.title}</h2><button className="close-sidebar" onClick={() => setIsSidebarOpen(false)}>×</button></div><div className="sidebar-content">{currentBook.entries.map(e => <SidebarItem key={e.id} entry={e} onSelect={handleSidebarSelect} currentId={currentEntry?.id} expandedIds={expandedIds} onToggle={id => setExpandedIds(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; })} />)}</div></div>{isSidebarOpen && <div className="sidebar-overlay" onClick={() => setIsSidebarOpen(false)} />}<div className="main-content" onTouchStart={e => { touchStartX.current = e.touches[0].clientX; touchStartY.current = e.touches[0].clientY; }} onTouchEnd={e => { const dx = e.changedTouches[0].clientX - touchStartX.current; const dy = e.changedTouches[0].clientY - touchStartY.current; if (dx > 120 && Math.abs(dx) > Math.abs(dy) * 2) { if (currentEntry || navigationStack.length > 0) { handleBack(); } else { handleBackToShelf(); } } }}><header className="top-bar"><div className="top-left"><button className="icon-btn" onClick={() => setIsSidebarOpen(true)}>☰</button>{(currentEntry || navigationStack.length > 0) && <button className="icon-btn" onClick={handleBack}>←</button>}<button className="icon-btn" onClick={handleBackToShelf}>🏠</button></div><div className="breadcrumb">{isVisitingInBook && <span className="friend-view-badge">👤 {visitingProfile?.name}</span>}<span className="book-name">{currentBook.title}</span>{currentEntry && <><span className="separator">/</span><span className="current-title">{currentEntry.title}</span></>}</div><div className="top-right">{isVisitingInBook ? (<span className="readonly-indicator">只读</span>) : ((viewMode === 'single' || viewMode === 'merged') && (<div className="read-mode-toggle" onClick={() => { if (!isReadOnly) { const ed = document.querySelector('.rich-editor'); if (ed) ed.forceSave?.(); } else if (viewMode === 'merged' && liveEntry) { initMerged(liveEntry); } setIsReadOnly(!isReadOnly); }}><span className={`toggle-label ${isReadOnly ? 'active' : ''}`}>阅读</span><div className={`toggle-switch ${!isReadOnly ? 'edit-mode' : ''}`}><div className="toggle-knob" /></div><span className={`toggle-label ${!isReadOnly ? 'active' : ''}`}>编辑</span></div>))}</div></header>{!currentEntry && currentBook.showStats && (<div className="book-info-card" onClick={() => { if (!isVisitingInBook) { setEditingBook(currentBook); setShowBookModal(true); } }}><div className="info-cover">{currentBook.coverImage ? <img src={currentBook.coverImage} alt="" /> : <span>{currentBook.cover}</span>}</div><div className="info-details">{currentBook.author && <p>作者：{currentBook.author}</p>}{currentBook.tags?.length > 0 && <p>标签：{currentBook.tags.join('、')}</p>}<p>词条：{countEntries(currentBook.entries)}条</p><p>字数：{countWords(currentBook.entries).toLocaleString()}字</p></div>{!isVisitingInBook && <span className="info-edit-hint">点击编辑 ›</span>}</div>)}{!currentEntry && currentBook.gallery?.enabled && (<div className="gallery-preview-strip"><div className="gallery-preview-scroll">{currentBook.gallery.images?.filter(img => img.featured).map(img => (<div key={img.id} className="gallery-strip-item" onClick={() => openGalleryPreview(img)}><img src={img.src} alt="" /></div>))}{(!currentBook.gallery.images?.filter(img => img.featured).length) && !isVisitingInBook && (<div className="gallery-strip-empty" onClick={() => setShowGallery(true)}><span>+</span><p>添加展示图片</p></div>)}</div><button className="gallery-enter-btn" onClick={() => setShowGallery(true)}>进入画廊 ›</button></div>)}<main className={`content-area ${slideAnim}`}>{viewMode === 'list' && !isReorderMode && (<>{currentEntry && <div className="list-header"><h1>{currentEntry.title}</h1>{currentEntry.summary && <p className="summary">{currentEntry.summary}</p>}</div>}<p className="swipe-hint">{isVisitingInBook ? '💡 左滑合并视图 · 右滑返回' : '💡 左滑合并视图 · 右滑返回 · 长按编辑'}</p><div className="entry-list">{currentEntries.map(e => { let tx = 0; return (<div key={e.id} className="entry-card" onClick={() => handleEntryClick(e)} onTouchStart={ev => { tx = ev.touches[0].clientX; if (!isVisitingInBook) handleLongPressStart(ev, 'entry', e); }} onTouchMove={!isVisitingInBook ? handleLongPressEnd : undefined} onTouchEnd={ev => { if (!isVisitingInBook) handleLongPressEnd(); handleEntrySwipe(e, ev.changedTouches[0].clientX - tx); }}><div className="entry-icon">{e.characterMode ? '👤' : e.novelMode ? '📖' : e.timelineMode ? '📅' : e.isFolder ? '📁' : '📄'}</div><div className="entry-info"><h3>{e.title}{e.linkable && <span className="star-badge">⭐</span>}{e.novelMode && <span className="novel-badge">正文</span>}{e.characterMode && <span className="character-badge">人设</span>}{e.timelineMode && <span className="timeline-badge">时间轴</span>}</h3><p>{e.summary}</p></div><span className="entry-arrow">›</span></div>); })}</div>{currentEntries.length === 0 && <div className="empty-state"><span>✨</span><p>{isVisitingInBook ? '这里还没有内容' : '点击右下角添加'}</p></div>}</>)}{(viewMode === 'list' || viewMode === 'character') && isReorderMode && <ReorderList entries={currentEntries} onReorder={handleReorder} onExit={() => setIsReorderMode(false)} />}{viewMode === 'single' && liveEntry && (<div className="single-view"><div className="export-content" ref={exportRef}><div className="content-header">{effectiveReadOnly ? <h1>{liveEntry.title}</h1> : <input type="text" className="editable-title" defaultValue={liveEntry.title} onBlur={ev => handleTitleChange(liveEntry.id, liveEntry.title, ev.target.value)} key={currentEntry.id + '-title'} />}{effectiveReadOnly ? (liveEntry.summary && <p className="entry-summary">{liveEntry.summary}</p>) : <input type="text" className="editable-summary" defaultValue={liveEntry.summary || ''} placeholder="添加简介..." onBlur={ev => handleSummaryChange(liveEntry.id, ev.target.value)} key={currentEntry.id + '-summary'} />}</div><div onTouchStart={effectiveReadOnly ? handleContentLongPressStart : undefined} onTouchEnd={effectiveReadOnly ? handleContentLongPressEnd : undefined} onTouchMove={effectiveReadOnly ? handleContentLongPressEnd : undefined}>{effectiveReadOnly ? <ContentRenderer content={liveEntry.content} allTitlesMap={allTitlesMap} currentBookId={currentBook.id} onLinkClick={handleLinkClick} fontFamily={currentFont} /> : <RichEditor key={currentEntry.id} content={liveEntry.content} onSave={html => saveContent(html)} fontFamily={currentFont} onImageClick={handleImageClick} onResetFormats={() => setActiveFormats({ bold: false, italic: false, underline: false, strike: false, size: 'medium' })} />}</div></div><div className="word-count">{countSingleEntryWords(liveEntry.content).toLocaleString()} 字</div></div>)}{viewMode === 'merged' && currentEntry && (<div className="merged-view">{effectiveReadOnly ? (<div ref={exportRef}><div className="content-header merged-header"><h1>{currentEntry.title}</h1><p className="merged-hint">📖 合并视图</p></div><div className="merged-content-read" onTouchStart={handleContentLongPressStart} onTouchEnd={handleContentLongPressEnd} onTouchMove={handleContentLongPressEnd}>{liveChildContent.map((it, i, arr) => (<div key={it.id} className="merged-section"><div className="section-title">• {it.title}</div><ContentRenderer content={it.content} allTitlesMap={allTitlesMap} currentBookId={currentBook.id} onLinkClick={handleLinkClick} fontFamily={currentFont} />{i < arr.length - 1 && <div className="section-divider" />}</div>))}</div></div>) : (<><div className="content-header merged-header"><h1>{currentEntry.title}</h1><p className="merged-hint">📖 合并视图</p></div><div className="merged-content-edit">{mergedContents.map((it, i) => (<div key={it.id} className="merged-edit-section"><div className="merged-edit-header">• <input type="text" className="merged-title-input" defaultValue={it.title} onBlur={ev => handleMergedChange(i, 'title', ev.target.value)} key={it.id + '-title'} /></div><div className="merged-editor-wrap" contentEditable dangerouslySetInnerHTML={{ __html: it.content }} onBlur={ev => handleMergedChange(i, 'content', ev.target.innerHTML)} onPaste={ev => { ev.preventDefault(); const text = ev.clipboardData.getData('text/plain'); document.execCommand('insertText', false, text); }} style={{ fontFamily: currentFont }} /></div>))}<button className="add-merged-entry-btn" onClick={handleAddMerged}>+ 添加词条</button></div></>)}<div className="word-count">{liveChildContent.reduce((sum, it) => sum + countSingleEntryWords(it.content), 0).toLocaleString()} 字</div></div>)}{viewMode === 'character' && currentEntry && !isReorderMode && (<div className="character-view"><div className="character-header"><h1>{currentEntry.title}</h1><p className="character-hint">👤 人设模式 · {currentEntry.children?.length || 0} 位角色</p></div><div className="character-grid">{(currentEntry.children || []).map((char, idx) => (<CharacterCard key={char.id} entry={char} style={characterCardStyle} onClick={handleCharacterClick} onLongPress={!isVisitingInBook ? handleCharacterLongPress : undefined} index={idx} />))}{!isVisitingInBook && <AddCharacterCard style={characterCardStyle} onClick={() => { setEditingCharacter(null); setShowCharacterModal(true); }} />}</div>{currentEntry.children?.length === 0 && <div className="empty-state"><span>👤</span><p>还没有人设</p><p>点击「+」添加角色</p></div>}</div>)}{viewMode === 'timeline' && liveEntry && (<div className="timeline-mode-view"><div className="timeline-header"><h1>{liveEntry.title}</h1><p className="timeline-hint">📅 时间轴模式</p></div><TimelineView entry={liveEntry} onAddEvent={(yearId) => { setEditingEvent(null); setShowAddEventModal(true); }} onEditEvent={(event) => { setEditingEvent(event); setShowAddEventModal(true); }} onDeleteEvent={handleDeleteTimelineEvent} onAddYear={(eraId) => { setEditingYear(null); setShowAddYearModal(true); }} onEditYear={(year) => { setEditingYear(year); setShowAddYearModal(true); }} onDeleteYear={handleDeleteYear} onAddEra={() => { setEditingEra(null); setShowAddEraModal(true); }} onEditEra={(era) => { setEditingEra(era); setShowAddEraModal(true); }} onDeleteEra={handleDeleteEra} expandedYears={expandedYears} onToggleYear={handleToggleYear} allTitlesMap={allTitlesMap} onLinkClick={handleLinkClick} currentSubTimeline={currentSubTimeline} onExitSubTimeline={() => setCurrentSubTimeline(null)} isReordering={isTimelineReordering} onReorderEvent={handleReorderEvent} /></div>)}{viewMode === 'novel' && liveEntry && (
   <NovelTocView 
     entry={liveEntry}
     onSelectChapter={(ch, parentVolId) => { 
@@ -4385,7 +5491,7 @@ export default function App() {
     collapsedVolumes={novelCollapsedVolumes}
     allEntries={currentBook.entries}
   />
-)}</main>{viewMode === 'list' && !isReorderMode && !isVisitingInBook && (<><button className={`fab ${showAddMenu ? 'active' : ''}`} onClick={() => setShowAddMenu(!showAddMenu)}><span style={{ transform: showAddMenu ? 'rotate(45deg)' : 'none', transition: 'transform 0.2s' }}>+</span></button><AddMenu isOpen={showAddMenu} onClose={() => setShowAddMenu(false)} onAddEntry={() => { setEditingEntry(null); setIsCreatingFolder(false); setShowEntryModal(true); }} onAddFolder={() => { setEditingEntry(null); setIsCreatingFolder(true); setShowEntryModal(true); }} onReorder={() => setIsReorderMode(true)} onToggleGallery={toggleGallery} galleryEnabled={currentBook?.gallery?.enabled} /></>)}{viewMode === 'character' && !isVisitingInBook && (<><button className={`fab ${showCharacterAddMenu ? 'active' : ''}`} onClick={() => setShowCharacterAddMenu(!showCharacterAddMenu)}><span style={{ transform: showCharacterAddMenu ? 'rotate(45deg)' : 'none', transition: 'transform 0.2s' }}>+</span></button><CharacterAddMenu isOpen={showCharacterAddMenu} onClose={() => setShowCharacterAddMenu(false)} onAddCharacter={() => { setEditingCharacter(null); setShowCharacterModal(true); }} onOpenRelationNetwork={() => setShowRelationNetwork(true)} onReorder={() => setIsReorderMode(true)} /></>)}{isEditing && <EditorToolbar onIndent={handleIndent} onFormat={() => { saveSelection(); setShowFormatMenu(true); }} onAlign={() => { saveSelection(); setShowAlignMenu(true); }} onFont={() => { saveSelection(); setShowFontMenu(true); }} onImage={handleImageUpload} hasActive={hasActiveFormat} />}<TextFormatMenu isOpen={showFormatMenu} onClose={() => { setShowFormatMenu(false); }} activeFormats={activeFormats} onToggleFormat={handleToggleFormat} /><AlignMenu isOpen={showAlignMenu} onClose={() => { setShowAlignMenu(false); restoreSelection(); }} onAlign={handleAlign} /><FontMenu isOpen={showFontMenu} onClose={() => { setShowFontMenu(false); restoreSelection(); }} onSelectFont={setCurrentFont} currentFont={currentFont} /></div><EntryModal isOpen={showEntryModal} onClose={() => { setShowEntryModal(false); setEditingEntry(null); }} onSave={editingEntry ? handleUpdateEntry : handleAddEntry} editingEntry={editingEntry} parentTitle={currentEntry?.title} isFolder={isCreatingFolder} /><ContextMenu isOpen={contextMenu.isOpen} position={contextMenu.position} onClose={() => setContextMenu({ ...contextMenu, isOpen: false })} options={contextMenu.options} /><MoveModal isOpen={showMoveModal} onClose={() => { setShowMoveModal(false); setMoveTarget(null); }} entry={moveTarget} entries={currentBook?.entries || []} currentParentId={currentEntry?.id || null} onMove={handleMoveEntry} /><ConfirmModal isOpen={confirmModal.isOpen} title={confirmModal.title} message={confirmModal.message} onConfirm={confirmModal.onConfirm} onCancel={() => setConfirmModal({ isOpen: false })} />{showGallery && (<div className="gallery-page" onClick={e => e.stopPropagation()}><div className="gallery-header"><button className="gallery-back" onClick={() => { setShowGallery(false); setGalleryContextMenu({ isOpen: false, image: null, position: { x: 0, y: 0 } }); }}>←</button><h2>{currentBook?.title}</h2><button className="gallery-upload" onClick={() => galleryUploadRef.current?.click()}>+ 添加</button><input ref={galleryUploadRef} type="file" accept="image/*" multiple onChange={uploadGalleryImage} style={{ display: 'none' }} /></div><div className="gallery-grid">{currentBook?.gallery?.images?.map(img => (<div key={img.id} className="gallery-item" onTouchStart={(e) => { e.stopPropagation(); const touch = e.touches[0]; galleryLongPressTimer.current = setTimeout(() => { if (navigator.vibrate) navigator.vibrate(30); setGalleryContextMenu({ isOpen: true, image: img, position: { x: touch.clientX, y: touch.clientY } }); }, 500); }} onTouchEnd={(e) => { e.stopPropagation(); if (galleryLongPressTimer.current) { clearTimeout(galleryLongPressTimer.current); galleryLongPressTimer.current = null; } }} onTouchMove={(e) => { if (galleryLongPressTimer.current) { clearTimeout(galleryLongPressTimer.current); galleryLongPressTimer.current = null; } }} onClick={(e) => { e.stopPropagation(); if (!galleryContextMenu.isOpen) openGalleryPreview(img); }}><img src={img.src} alt="" draggable={false} />{img.featured && <span className="featured-star">★</span>}</div>))}{(!currentBook?.gallery?.images || currentBook.gallery.images.length === 0) && (<div className="gallery-empty"><span>🖼️</span><p>还没有图片</p><p>点击右上角添加</p></div>)}</div>{galleryContextMenu.isOpen && (<><div className="gallery-context-overlay" onClick={(e) => { e.stopPropagation(); setGalleryContextMenu({ isOpen: false, image: null, position: { x: 0, y: 0 } }); }} /><div className="context-menu" style={{ top: galleryContextMenu.position.y, left: Math.min(galleryContextMenu.position.x, window.innerWidth - 180) }}><div className="context-item" onClick={(e) => { e.stopPropagation(); toggleFeatured(galleryContextMenu.image.id); }}><span className="context-icon">{galleryContextMenu.image.featured ? '☆' : '★'}</span>{galleryContextMenu.image.featured ? '取消展示' : '展示'}</div><div className="context-item danger" onClick={(e) => { e.stopPropagation(); deleteGalleryImage(galleryContextMenu.image.id); }}><span className="context-icon">🗑️</span>删除图片</div></div></>)}{galleryConfirmModal.isOpen && (<div className="gallery-confirm-overlay" onClick={(e) => { e.stopPropagation(); setGalleryConfirmModal({ isOpen: false }); }}><div className="modal-content confirm-modal" onClick={e => e.stopPropagation()}><h3>{galleryConfirmModal.title}</h3><p>{galleryConfirmModal.message}</p><div className="modal-actions"><button className="btn-cancel" onClick={() => setGalleryConfirmModal({ isOpen: false })}>取消</button><button className="btn-save" onClick={galleryConfirmModal.onConfirm}>确定</button></div></div></div>)}</div>)}{galleryPreviewImage && (<div className="gallery-viewer" onTouchStart={(e) => {
+)}</main>{viewMode === 'list' && !isReorderMode && !isVisitingInBook && (<><button className={`fab ${showAddMenu ? 'active' : ''}`} onClick={() => setShowAddMenu(!showAddMenu)}><span style={{ transform: showAddMenu ? 'rotate(45deg)' : 'none', transition: 'transform 0.2s' }}>+</span></button><AddMenu isOpen={showAddMenu} onClose={() => setShowAddMenu(false)} onAddEntry={() => { setEditingEntry(null); setIsCreatingFolder(false); setShowEntryModal(true); }} onAddFolder={() => { setEditingEntry(null); setIsCreatingFolder(true); setShowEntryModal(true); }} onReorder={() => setIsReorderMode(true)} onToggleGallery={toggleGallery} galleryEnabled={currentBook?.gallery?.enabled} /></>)}{viewMode === 'character' && !isVisitingInBook && (<><button className={`fab ${showCharacterAddMenu ? 'active' : ''}`} onClick={() => setShowCharacterAddMenu(!showCharacterAddMenu)}><span style={{ transform: showCharacterAddMenu ? 'rotate(45deg)' : 'none', transition: 'transform 0.2s' }}>+</span></button><CharacterAddMenu isOpen={showCharacterAddMenu} onClose={() => setShowCharacterAddMenu(false)} onAddCharacter={() => { setEditingCharacter(null); setShowCharacterModal(true); }} onOpenRelationNetwork={() => setShowRelationNetwork(true)} onReorder={() => setIsReorderMode(true)} /></>)}{viewMode === 'timeline' && !isVisitingInBook && (<><button className={`fab ${showTimelineAddMenu ? 'active' : ''}`} onClick={() => setShowTimelineAddMenu(!showTimelineAddMenu)}><span style={{ transform: showTimelineAddMenu ? 'rotate(45deg)' : 'none', transition: 'transform 0.2s' }}>+</span></button><TimelineAddMenu isOpen={showTimelineAddMenu} onClose={() => setShowTimelineAddMenu(false)} onAddEvent={() => { setEditingEvent(null); setShowAddEventModal(true); }} onAddYear={() => { setEditingYear(null); setShowAddYearModal(true); }} onAddEra={() => { setEditingEra(null); setShowAddEraModal(true); }} onManageSubTimelines={() => setShowSubTimelines(true)} onReorder={() => setIsTimelineReordering(!isTimelineReordering)} isReordering={isTimelineReordering} /></>)}{isEditing && <EditorToolbar onIndent={handleIndent} onFormat={() => { saveSelection(); setShowFormatMenu(true); }} onAlign={() => { saveSelection(); setShowAlignMenu(true); }} onFont={() => { saveSelection(); setShowFontMenu(true); }} onImage={handleImageUpload} hasActive={hasActiveFormat} />}<TextFormatMenu isOpen={showFormatMenu} onClose={() => { setShowFormatMenu(false); }} activeFormats={activeFormats} onToggleFormat={handleToggleFormat} /><AlignMenu isOpen={showAlignMenu} onClose={() => { setShowAlignMenu(false); restoreSelection(); }} onAlign={handleAlign} /><FontMenu isOpen={showFontMenu} onClose={() => { setShowFontMenu(false); restoreSelection(); }} onSelectFont={setCurrentFont} currentFont={currentFont} /></div><EntryModal isOpen={showEntryModal} onClose={() => { setShowEntryModal(false); setEditingEntry(null); }} onSave={editingEntry ? handleUpdateEntry : handleAddEntry} editingEntry={editingEntry} parentTitle={currentEntry?.title} isFolder={isCreatingFolder} /><ContextMenu isOpen={contextMenu.isOpen} position={contextMenu.position} onClose={() => setContextMenu({ ...contextMenu, isOpen: false })} options={contextMenu.options} /><MoveModal isOpen={showMoveModal} onClose={() => { setShowMoveModal(false); setMoveTarget(null); }} entry={moveTarget} entries={currentBook?.entries || []} currentParentId={currentEntry?.id || null} onMove={handleMoveEntry} /><ConfirmModal isOpen={confirmModal.isOpen} title={confirmModal.title} message={confirmModal.message} onConfirm={confirmModal.onConfirm} onCancel={() => setConfirmModal({ isOpen: false })} />{showGallery && (<div className="gallery-page" onClick={e => e.stopPropagation()}><div className="gallery-header"><button className="gallery-back" onClick={() => { setShowGallery(false); setGalleryContextMenu({ isOpen: false, image: null, position: { x: 0, y: 0 } }); }}>←</button><h2>{currentBook?.title}</h2><button className="gallery-upload" onClick={() => galleryUploadRef.current?.click()}>+ 添加</button><input ref={galleryUploadRef} type="file" accept="image/*" multiple onChange={uploadGalleryImage} style={{ display: 'none' }} /></div><div className="gallery-grid">{currentBook?.gallery?.images?.map(img => (<div key={img.id} className="gallery-item" onTouchStart={(e) => { e.stopPropagation(); const touch = e.touches[0]; galleryLongPressTimer.current = setTimeout(() => { if (navigator.vibrate) navigator.vibrate(30); setGalleryContextMenu({ isOpen: true, image: img, position: { x: touch.clientX, y: touch.clientY } }); }, 500); }} onTouchEnd={(e) => { e.stopPropagation(); if (galleryLongPressTimer.current) { clearTimeout(galleryLongPressTimer.current); galleryLongPressTimer.current = null; } }} onTouchMove={(e) => { if (galleryLongPressTimer.current) { clearTimeout(galleryLongPressTimer.current); galleryLongPressTimer.current = null; } }} onClick={(e) => { e.stopPropagation(); if (!galleryContextMenu.isOpen) openGalleryPreview(img); }}><img src={img.src} alt="" draggable={false} />{img.featured && <span className="featured-star">★</span>}</div>))}{(!currentBook?.gallery?.images || currentBook.gallery.images.length === 0) && (<div className="gallery-empty"><span>🖼️</span><p>还没有图片</p><p>点击右上角添加</p></div>)}</div>{galleryContextMenu.isOpen && (<><div className="gallery-context-overlay" onClick={(e) => { e.stopPropagation(); setGalleryContextMenu({ isOpen: false, image: null, position: { x: 0, y: 0 } }); }} /><div className="context-menu" style={{ top: galleryContextMenu.position.y, left: Math.min(galleryContextMenu.position.x, window.innerWidth - 180) }}><div className="context-item" onClick={(e) => { e.stopPropagation(); toggleFeatured(galleryContextMenu.image.id); }}><span className="context-icon">{galleryContextMenu.image.featured ? '☆' : '★'}</span>{galleryContextMenu.image.featured ? '取消展示' : '展示'}</div><div className="context-item danger" onClick={(e) => { e.stopPropagation(); deleteGalleryImage(galleryContextMenu.image.id); }}><span className="context-icon">🗑️</span>删除图片</div></div></>)}{galleryConfirmModal.isOpen && (<div className="gallery-confirm-overlay" onClick={(e) => { e.stopPropagation(); setGalleryConfirmModal({ isOpen: false }); }}><div className="modal-content confirm-modal" onClick={e => e.stopPropagation()}><h3>{galleryConfirmModal.title}</h3><p>{galleryConfirmModal.message}</p><div className="modal-actions"><button className="btn-cancel" onClick={() => setGalleryConfirmModal({ isOpen: false })}>取消</button><button className="btn-save" onClick={galleryConfirmModal.onConfirm}>确定</button></div></div></div>)}</div>)}{galleryPreviewImage && (<div className="gallery-viewer" onTouchStart={(e) => {
   e.stopPropagation();
   if (e.touches.length === 2) {
     const dx = e.touches[0].clientX - e.touches[1].clientX;
@@ -4505,7 +5611,7 @@ export default function App() {
   onSave={handleSaveStoryEdit}
   editingItem={storyEditItem}
   type={storyEditType}
-/><CharacterEditModal isOpen={showCharacterModal} onClose={() => { setShowCharacterModal(false); setEditingCharacter(null); }} onSave={editingCharacter ? handleUpdateCharacter : handleAddCharacter} editingEntry={editingCharacter} /><RelationNetworkPage isOpen={showRelationNetwork} onClose={() => setShowRelationNetwork(false)} entries={currentEntry?.children || []} relations={currentEntry?.characterRelations || []} onAddRelation={handleAddRelation} onDeleteRelation={handleDeleteRelation} onUpdateRelation={handleUpdateRelation} bookTitle={currentEntry?.title || ''} cardStyle={characterCardStyle} />{showCharacterDetail && (<CharacterDetailPage entry={showCharacterDetail} onClose={() => setShowCharacterDetail(null)} onSave={(updatedEntry) => { setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, updatedEntry.id, { content: updatedEntry.content }) } : b) })); setShowCharacterDetail({ ...showCharacterDetail, content: updatedEntry.content }); }} isReadOnly={!!visitingBookshelf} cardStyle={characterCardStyle} allTitlesMap={allTitlesMap} onLinkClick={(kw, bookId, entryId) => { setShowCharacterDetail(null); handleLinkClick(kw, bookId, entryId); }} bookName={currentBook?.title} />)}{toast.show && <div className="app-toast">{toast.message}</div>}<style>{styles}</style></div>);
+/><CharacterEditModal isOpen={showCharacterModal} onClose={() => { setShowCharacterModal(false); setEditingCharacter(null); }} onSave={editingCharacter ? handleUpdateCharacter : handleAddCharacter} editingEntry={editingCharacter} /><RelationNetworkPage isOpen={showRelationNetwork} onClose={() => setShowRelationNetwork(false)} entries={currentEntry?.children || []} relations={currentEntry?.characterRelations || []} onAddRelation={handleAddRelation} onDeleteRelation={handleDeleteRelation} onUpdateRelation={handleUpdateRelation} bookTitle={currentEntry?.title || ''} cardStyle={characterCardStyle} /><AddEraModal isOpen={showAddEraModal} onClose={() => { setShowAddEraModal(false); setEditingEra(null); }} onSave={editingEra ? handleUpdateEra : handleAddEra} editingEra={editingEra} /><AddYearModal isOpen={showAddYearModal} onClose={() => { setShowAddYearModal(false); setEditingYear(null); }} onSave={editingYear ? handleUpdateYear : handleAddYear} editingYear={editingYear} eras={currentEntry?.timelineConfig?.eras || []} /><AddEventModal isOpen={showAddEventModal} onClose={() => { setShowAddEventModal(false); setEditingEvent(null); }} onSave={editingEvent ? handleUpdateTimelineEvent : handleAddTimelineEvent} editingEvent={editingEvent} eras={currentEntry?.timelineConfig?.eras || []} years={currentEntry?.timelineConfig?.years || []} allTitlesMap={allTitlesMap} /><AddSubTimelineModal isOpen={showAddSubTimelineModal} onClose={() => setShowAddSubTimelineModal(false)} onSave={handleAddSubTimeline} eras={currentEntry?.timelineConfig?.eras || []} characters={[]} /><SubTimelineListPage isOpen={showSubTimelines} onClose={() => setShowSubTimelines(false)} subTimelines={currentEntry?.timelineConfig?.subTimelines || []} eras={currentEntry?.timelineConfig?.eras || []} onSelect={(st) => { setCurrentSubTimeline(st); setShowSubTimelines(false); }} onAdd={() => { setShowSubTimelines(false); setShowAddSubTimelineModal(true); }} onDelete={handleDeleteSubTimeline} />{showCharacterDetail && (<CharacterDetailPage entry={showCharacterDetail} onClose={() => setShowCharacterDetail(null)} onSave={(updatedEntry) => { setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, updatedEntry.id, { content: updatedEntry.content }) } : b) })); setShowCharacterDetail({ ...showCharacterDetail, content: updatedEntry.content }); }} isReadOnly={!!visitingBookshelf} cardStyle={characterCardStyle} allTitlesMap={allTitlesMap} onLinkClick={(kw, bookId, entryId) => { setShowCharacterDetail(null); handleLinkClick(kw, bookId, entryId); }} bookName={currentBook?.title} />)}{toast.show && <div className="app-toast">{toast.message}</div>}<style>{styles}</style></div>);
 }
 
 const styles = `
@@ -5463,6 +6569,184 @@ html,body,#root{height:100%;overflow:hidden}
 .style-preview.dark-preview .preview-name{color:#f4e4c1;font-size:.5rem}
 .style-preview.light-preview .preview-name{color:#2D3047;font-size:.5rem}
 .style-label{color:rgba(244,228,193,.7);font-size:.8rem}
+
+/* 时间轴标签 */
+.timeline-badge{display:inline-block;font-size:.6rem;background:linear-gradient(135deg,#D4A84B,#C9A227);color:#1a1a2e;padding:2px 6px;border-radius:8px;margin-left:6px;vertical-align:middle}
+
+/* 时间轴模式视图 */
+.timeline-mode-view{padding:0 16px 100px}
+.timeline-header{text-align:center;padding:20px 0}
+.timeline-header h1{font-family:'ZCOOL XiaoWei',serif;font-size:1.5rem;color:#2D3047;margin-bottom:8px}
+.timeline-hint{color:#8B7355;font-size:.85rem}
+
+/* 时间轴空状态 */
+.timeline-empty{text-align:center;padding:80px 20px}
+.timeline-empty span{font-size:4rem;display:block;margin-bottom:20px}
+.timeline-empty h3{font-family:'ZCOOL XiaoWei',serif;font-size:1.3rem;color:#2D3047;margin-bottom:12px}
+.timeline-empty p{color:#888;margin-bottom:24px}
+.timeline-empty button{background:linear-gradient(135deg,#D4A84B,#C9A227);color:#1a1a2e;border:none;padding:12px 24px;border-radius:24px;font-size:1rem;cursor:pointer;font-family:'Noto Serif SC',serif}
+
+/* 时间轴视图 */
+.timeline-view{padding-bottom:20px}
+.timeline-content{position:relative;padding-left:20px}
+
+/* 子轴横幅 */
+.sub-timeline-banner{display:flex;align-items:center;gap:10px;background:rgba(212,168,75,.1);border:1px solid rgba(212,168,75,.3);border-radius:12px;padding:10px 16px;margin-bottom:20px}
+.sub-timeline-banner span:first-child{font-size:1.2rem}
+.sub-timeline-banner span:nth-child(2){flex:1;color:#8B7355;font-weight:500}
+.sub-timeline-banner button{background:none;border:1px solid #8B7355;color:#8B7355;padding:6px 12px;border-radius:16px;font-size:.8rem;cursor:pointer}
+
+/* 纪年区块 */
+.timeline-era{margin-bottom:32px}
+.era-gap{text-align:center;padding:12px 0;color:#999;font-size:.8rem;border-left:2px dashed rgba(139,115,85,.3);margin-left:8px}
+.era-header{background:linear-gradient(135deg,#2D3047,#1a1a2e);padding:12px 20px;border-radius:12px;margin-bottom:16px;cursor:pointer}
+.era-name{color:#f4e4c1;font-family:'ZCOOL XiaoWei',serif;font-size:1.2rem;letter-spacing:2px}
+
+/* 时间轴轨道 */
+.timeline-track{position:relative;border-left:2px solid rgba(139,115,85,.4);margin-left:8px;padding-left:24px}
+
+/* 年份跳过 */
+.year-skip{display:flex;align-items:center;gap:10px;padding:8px 0;margin:8px 0}
+.skip-line{color:#999;font-size:.75rem;letter-spacing:1px}
+.skip-add{background:rgba(139,115,85,.1);border:1px dashed #8B7355;color:#8B7355;width:24px;height:24px;border-radius:50%;font-size:.9rem;cursor:pointer;display:flex;align-items:center;justify-content:center}
+
+/* 年份间隔 */
+.year-gap{text-align:center;padding:12px 0;color:#8B7355;font-size:.8rem}
+.year-gap span{display:inline-block;padding:4px 16px;background:rgba(139,115,85,.08);border-radius:12px}
+
+/* 年份节点 */
+.year-node{position:relative;margin-bottom:16px}
+.year-marker{display:flex;align-items:center;gap:10px;cursor:pointer;padding:4px 0}
+.node-dot{position:absolute;left:-33px;width:16px;height:16px;background:#D4A84B;border-radius:50%;border:3px solid #faf8f3}
+.node-year{color:#2D3047;font-weight:600;font-size:.95rem}
+.event-count{color:#8B7355;font-size:.8rem;margin-left:auto}
+
+/* 年份事件 */
+.year-events{padding:8px 0 0 4px}
+.add-event-btn{background:none;border:1px dashed rgba(139,115,85,.4);color:#8B7355;padding:8px 16px;border-radius:16px;font-size:.85rem;cursor:pointer;width:100%}
+.add-event-btn:active{background:rgba(139,115,85,.1)}
+.event-item{background:rgba(255,255,255,.8);border-radius:10px;padding:10px 14px;margin-bottom:8px;box-shadow:0 2px 8px rgba(0,0,0,.05);border-left:3px solid #D4A84B}
+.event-item.approximate{border-left-color:#999;background:rgba(255,255,255,.6)}
+.event-item.approximate .node-dot{background:#999}
+.event-time{display:block;color:#8B7355;font-size:.75rem;margin-bottom:4px}
+.event-content{color:#2D3047;font-size:.9rem;line-height:1.6}
+.event-link{color:#D4A84B;cursor:pointer;background:linear-gradient(180deg,transparent 65%,rgba(212,168,75,.2) 65%)}
+.event-link.broken{color:#999;background:none}
+.from-sub{margin-left:6px;font-size:.7rem}
+
+.events-collapsed{padding:8px 0;cursor:pointer}
+.first-event{color:#666;font-size:.85rem}
+.more-hint{color:#8B7355;font-size:.75rem;margin-left:8px}
+
+/* 无事件提示 */
+.no-events-hint{padding:16px 0}
+.no-events-hint .hint-text{color:#999;font-size:.85rem;margin-bottom:12px}
+.add-first-event{background:none;border:1px dashed rgba(139,115,85,.4);color:#8B7355;padding:10px 20px;border-radius:20px;font-size:.85rem;cursor:pointer}
+
+/* 时代事件区 */
+.era-events-section{margin-top:24px;padding-top:24px;border-top:1px dashed rgba(139,115,85,.3)}
+.era-event-item{background:rgba(139,115,85,.08);border-radius:10px;padding:12px 16px;margin-bottom:10px}
+.era-event-label{display:block;color:#8B7355;font-size:.8rem;margin-bottom:6px;font-style:italic}
+.era-event-content{color:#2D3047;font-size:.9rem}
+
+/* 未知时间区 */
+.unknown-events-section{margin-top:24px;padding:16px;background:rgba(0,0,0,.03);border-radius:12px;border:1px dashed rgba(0,0,0,.1)}
+.unknown-header{color:#999;font-size:.85rem;margin-bottom:12px;text-align:center}
+.unknown-event-item{display:flex;align-items:flex-start;gap:10px;padding:8px 0}
+.unknown-dot{color:#ccc;font-size:1rem}
+.unknown-content{color:#666;font-size:.85rem}
+
+/* 纪年弹窗 */
+.era-modal{max-width:360px}
+.era-modal .form-field{margin-bottom:14px}
+.era-modal .form-field label{display:block;font-size:.85rem;color:#8B7355;margin-bottom:6px;font-weight:500}
+.era-modal .form-field input{width:100%;padding:12px 16px;border:2px solid rgba(45,48,71,.1);border-radius:10px;font-family:'Noto Serif SC',serif;font-size:1rem;box-sizing:border-box}
+.era-modal .form-field input:focus{outline:none;border-color:#8B7355}
+.era-modal .form-field input::placeholder{color:#aaa}
+
+/* 年份弹窗 */
+.year-modal{max-width:360px}
+.year-modal .form-field{margin-bottom:14px}
+.year-modal .form-field label{display:block;font-size:.85rem;color:#8B7355;margin-bottom:6px;font-weight:500}
+.year-modal .form-field input,.year-modal .form-field select{width:100%;padding:12px 16px;border:2px solid rgba(45,48,71,.1);border-radius:10px;font-family:'Noto Serif SC',serif;font-size:1rem;box-sizing:border-box}
+.year-modal .form-field input:focus,.year-modal .form-field select:focus{outline:none;border-color:#8B7355}
+.year-modal .form-field input::placeholder{color:#aaa}
+.era-number-row{display:flex;gap:12px;margin-bottom:14px}
+.era-number-field{flex:1}
+.era-number-field label{display:block;font-size:.8rem;color:#8B7355;margin-bottom:6px}
+.era-number-field input{width:100%;padding:10px;border:1px solid rgba(139,115,85,.3);border-radius:8px;font-size:1rem;text-align:center}
+.era-gap-row{display:flex;align-items:center;gap:10px;margin-bottom:12px;margin-top:4px}
+.era-gap-row label{color:#8B7355;font-size:.85rem;font-weight:500}
+.era-gap-row input{width:80px;padding:8px;border:1px solid rgba(139,115,85,.3);border-radius:8px;text-align:center}
+.era-gap-row span{color:#666;font-size:.85rem}
+
+/* 事件弹窗 */
+.event-modal{max-width:380px}
+.event-modal .time-selector{margin-bottom:16px}
+.event-modal .time-row{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.event-modal .era-year-row{display:flex;gap:8px}
+.event-modal .era-select{flex:0.9}
+.event-modal .year-select{flex:1.1}
+.event-modal .month-day-row select{flex:1}
+.event-modal .month-day-row input{width:70px;flex:0 0 70px}
+.event-modal select,.event-modal input[type="number"]{padding:10px 12px;border:2px solid rgba(45,48,71,.1);border-radius:8px;font-family:'Noto Serif SC',serif;font-size:.9rem}
+.event-modal select:focus,.event-modal input:focus{outline:none;border-color:#8B7355}
+.content-input{margin-bottom:12px}
+.content-input label{display:block;color:#666;font-size:.85rem;margin-bottom:6px}
+.content-input textarea{width:100%;padding:12px;border:1px solid rgba(139,115,85,.3);border-radius:10px;font-size:.9rem;resize:vertical;font-family:'Noto Serif SC',serif}
+
+/* 子时间轴弹窗 */
+.sub-timeline-modal{max-width:360px}
+.icon-selector{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-bottom:16px}
+.icon-option{font-size:1.5rem;padding:8px;border-radius:8px;cursor:pointer}
+.icon-option.selected{background:rgba(212,168,75,.2)}
+.range-section{margin-top:12px}
+.range-section label{display:block;color:#666;font-size:.85rem;margin-bottom:8px}
+.range-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.range-row select,.range-row input{padding:8px;border:1px solid rgba(139,115,85,.3);border-radius:8px;font-size:.85rem}
+.range-row select{flex:1;min-width:80px}
+.range-row input{width:60px}
+.range-row span{color:#999}
+
+/* 子时间轴列表页 */
+.sub-timeline-page{position:fixed;inset:0;background:linear-gradient(180deg,#faf8f3 0%,#f5f0e8 100%);z-index:2500;display:flex;flex-direction:column;animation:slideUpProfile .3s ease-out}
+.sub-timeline-header{display:flex;align-items:center;justify-content:space-between;padding:16px;border-bottom:1px solid rgba(45,48,71,.1);background:rgba(250,248,243,.95)}
+.sub-timeline-header .back-btn{background:none;border:none;font-size:1.3rem;cursor:pointer;color:#2D3047}
+.sub-timeline-header h2{font-family:'ZCOOL XiaoWei',serif;font-size:1.2rem;color:#2D3047}
+.sub-timeline-header .add-btn{background:linear-gradient(135deg,#D4A84B,#C9A227);color:#fff;border:none;width:32px;height:32px;border-radius:50%;font-size:1.2rem;cursor:pointer}
+.sub-timeline-list{flex:1;overflow-y:auto;padding:16px}
+.sub-timeline-list .empty-hint{text-align:center;padding:60px 20px;color:#999}
+.sub-timeline-list .empty-hint span{font-size:3rem;display:block;margin-bottom:16px}
+.sub-timeline-list .empty-hint p{margin:6px 0;font-size:.9rem}
+.sub-timeline-card{display:flex;align-items:center;gap:14px;background:#fff;padding:16px;border-radius:12px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.05);cursor:pointer}
+.sub-timeline-card:active{background:#f9f6f1}
+.st-icon{font-size:1.8rem}
+.st-info{flex:1}
+.st-info h3{font-size:1rem;color:#2D3047;margin-bottom:4px}
+.st-info p{font-size:.8rem;color:#8B7355}
+.st-delete{background:none;border:none;color:#999;font-size:1.3rem;cursor:pointer;padding:8px}
+.st-delete:hover{color:#e74c3c}
+
+/* 时间类型选择器 */
+.time-type-selector{display:flex;gap:8px;margin-bottom:16px}
+.time-type-selector button{flex:1;padding:10px;background:#f5f5f5;border:1px solid #ddd;border-radius:8px;font-size:.9rem;cursor:pointer}
+.time-type-selector button.active{background:#D4A84B;border-color:#D4A84B;color:#fff}
+.year-input{flex:1;min-width:0}
+
+/* 排序模式 */
+.timeline-view.reordering .event-item{cursor:grab;border:2px dashed #D4A84B}
+.timeline-view.reordering .event-item:active{cursor:grabbing;opacity:.8}
+.reorder-hint{text-align:center;color:#D4A84B;font-size:.85rem;padding:12px;background:rgba(212,168,75,.1);border-radius:8px;margin-bottom:16px}
+.drag-handle{color:#999;margin-right:8px;cursor:grab}
+.event-item.draggable{user-select:none}
+
+/* 时间轴+菜单 */
+.timeline-add-menu{bottom:80px}
+.add-menu-item.active{background:rgba(212,168,75,.2)}
+
+/* 确认删除弹窗 */
+.confirm-modal .warning{color:#e74c3c;font-size:.85rem;margin-top:8px}
+.btn-delete{background:#e74c3c;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer}
 
 @keyframes fadeInUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
 `;
