@@ -415,10 +415,13 @@ const AddCharacterCard = ({ style = 'dark', onClick }) => {
 };
 
 // 人设详情页（完整词条页，上方身份证+下方内容编辑）
-const CharacterDetailPage = ({ entry, onClose, onSave, isReadOnly, cardStyle, allTitlesMap, onLinkClick, bookName }) => {
+const CharacterDetailPage = ({ entry, onClose, onSave, isReadOnly, cardStyle, allTitlesMap, onLinkClick, bookName, onExportImage }) => {
   const [isEditMode, setIsEditMode] = useState(false);
   const [content, setContent] = useState('');
   const contentRef = useRef(null);
+  const exportRef = useRef(null);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const longPressTimer = useRef(null);
   
   // 将HTML内容转换为纯文本（用于编辑模式）
   const htmlToText = (html) => {
@@ -491,6 +494,22 @@ const CharacterDetailPage = ({ entry, onClose, onSave, isReadOnly, cardStyle, al
     setIsEditMode(false);
   };
   
+  // 长按处理
+  const handleLongPressStart = (e) => {
+    if (isEditMode) return;
+    longPressTimer.current = setTimeout(() => {
+      if (navigator.vibrate) navigator.vibrate(30);
+      setShowExportMenu(true);
+    }, 500);
+  };
+  
+  const handleLongPressEnd = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+  
   return (
     <div className="character-detail-page">
       <div className="character-detail-header">
@@ -510,7 +529,13 @@ const CharacterDetailPage = ({ entry, onClose, onSave, isReadOnly, cardStyle, al
         )}
       </div>
       
-      <div className="character-detail-content">
+      <div 
+        className="character-detail-content"
+        ref={exportRef}
+        onTouchStart={handleLongPressStart}
+        onTouchEnd={handleLongPressEnd}
+        onTouchMove={handleLongPressEnd}
+      >
         {/* 身份证卡片 - 米棕色风格 */}
         <div className={`char-profile-card ${cardStyle}`}>
           <div className="profile-main">
@@ -565,7 +590,7 @@ const CharacterDetailPage = ({ entry, onClose, onSave, isReadOnly, cardStyle, al
               />
             ) : (
               <div className="detail-content">
-                {content ? (
+                {entry.content ? (
                   <div ref={contentRef} className="detail-body" />
                 ) : (
                   <p className="empty-hint">暂无详细设定，切换到编辑模式添加内容</p>
@@ -575,6 +600,24 @@ const CharacterDetailPage = ({ entry, onClose, onSave, isReadOnly, cardStyle, al
           </div>
         </div>
       </div>
+      
+      {/* 导出菜单 */}
+      {showExportMenu && (
+        <>
+          <div className="export-menu-overlay" onClick={() => setShowExportMenu(false)} />
+          <div className="export-menu" style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}>
+            <div className="export-menu-item" onClick={() => {
+              setShowExportMenu(false);
+              if (onExportImage && exportRef.current) {
+                onExportImage(exportRef.current, entry.title);
+              }
+            }}>
+              <span>📷</span>
+              <span>导出长图</span>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 };
@@ -3814,67 +3857,80 @@ export default function App() {
     }
   };
 
-  // 递归重新生成所有ID
+  // 递归重新生成所有ID（两遍处理：先收集映射，再更新引用）
   const regenerateIds = (entries, idMap = new Map()) => {
-    return entries.map(entry => {
-      const oldId = entry.id;
-      const newId = generateId();
-      idMap.set(oldId, newId);
-      
-      const newEntry = {
-        ...entry,
-        id: newId
-      };
-      
-      // 处理人物关系中的ID引用
-      if (entry.characterRelations) {
-        newEntry.characterRelations = entry.characterRelations.map(rel => ({
-          ...rel,
-          id: generateId(),
-          from: idMap.get(rel.from) || rel.from,
-          to: idMap.get(rel.to) || rel.to
-        }));
-      }
-      
-      // 处理时间轴配置中的ID
-      if (entry.timelineConfig) {
-        const eraIdMap = new Map();
-        const yearIdMap = new Map();
-        
-        newEntry.timelineConfig = {
-          eras: (entry.timelineConfig.eras || []).map(era => {
-            const newEraId = generateId();
-            eraIdMap.set(era.id, newEraId);
-            return { ...era, id: newEraId };
-          }),
-          years: (entry.timelineConfig.years || []).map(year => {
-            const newYearId = generateId();
-            yearIdMap.set(year.id, newYearId);
-            return { 
-              ...year, 
-              id: newYearId,
-              eraId: eraIdMap.get(year.eraId) || year.eraId
-            };
-          }),
-          events: (entry.timelineConfig.events || []).map(event => ({
-            ...event,
-            id: generateId(),
-            yearId: yearIdMap.get(event.yearId) || event.yearId
-          })),
-          subTimelines: (entry.timelineConfig.subTimelines || []).map(st => ({
-            ...st,
-            id: generateId()
-          }))
+    // 第一遍：递归收集所有旧ID到新ID的映射
+    const collectIds = (items) => {
+      items.forEach(entry => {
+        const newId = generateId();
+        idMap.set(entry.id, newId);
+        if (entry.children?.length > 0) {
+          collectIds(entry.children);
+        }
+      });
+    };
+    collectIds(entries);
+    
+    // 第二遍：递归更新所有ID和引用
+    const updateEntries = (items) => {
+      return items.map(entry => {
+        const newEntry = {
+          ...entry,
+          id: idMap.get(entry.id)
         };
-      }
-      
-      // 递归处理子条目
-      if (entry.children?.length > 0) {
-        newEntry.children = regenerateIds(entry.children, idMap);
-      }
-      
-      return newEntry;
-    });
+        
+        // 处理人物关系中的ID引用
+        if (entry.characterRelations) {
+          newEntry.characterRelations = entry.characterRelations.map(rel => ({
+            ...rel,
+            id: generateId(),
+            from: idMap.get(rel.from) || rel.from,
+            to: idMap.get(rel.to) || rel.to
+          }));
+        }
+        
+        // 处理时间轴配置中的ID
+        if (entry.timelineConfig) {
+          const eraIdMap = new Map();
+          const yearIdMap = new Map();
+          
+          newEntry.timelineConfig = {
+            eras: (entry.timelineConfig.eras || []).map(era => {
+              const newEraId = generateId();
+              eraIdMap.set(era.id, newEraId);
+              return { ...era, id: newEraId };
+            }),
+            years: (entry.timelineConfig.years || []).map(year => {
+              const newYearId = generateId();
+              yearIdMap.set(year.id, newYearId);
+              return { 
+                ...year, 
+                id: newYearId,
+                eraId: eraIdMap.get(year.eraId) || year.eraId
+              };
+            }),
+            events: (entry.timelineConfig.events || []).map(event => ({
+              ...event,
+              id: generateId(),
+              yearId: yearIdMap.get(event.yearId) || event.yearId
+            })),
+            subTimelines: (entry.timelineConfig.subTimelines || []).map(st => ({
+              ...st,
+              id: generateId()
+            }))
+          };
+        }
+        
+        // 递归处理子条目
+        if (entry.children?.length > 0) {
+          newEntry.children = updateEntries(entry.children);
+        }
+        
+        return newEntry;
+      });
+    };
+    
+    return updateEntries(entries);
   };
 
   // 导入书籍文件的ref
@@ -3938,10 +3994,19 @@ export default function App() {
         settings: bookData.settings || {}
       };
       
-      setData(prev => ({
-        ...prev,
-        books: [...prev.books, newBook]
-      }));
+      // 更新数据并立即同步到云端
+      setData(prev => {
+        const newData = {
+          ...prev,
+          books: [...prev.books, newBook]
+        };
+        // 立即保存到本地和云端，防止被旧数据覆盖
+        saveToStorage(newData);
+        if (user) {
+          saveToCloud(newData);
+        }
+        return newData;
+      });
       
       showToast(`已导入「${newBook.title}」`);
     } catch (err) {
@@ -5822,6 +5887,10 @@ export default function App() {
       el.style.padding = '24px 20px';
       el.style.boxShadow = '0 4px 20px rgba(45,48,71,.1)';
       
+      // 限制最大高度，防止内存溢出
+      const maxHeight = 10000;
+      const actualHeight = Math.min(el.offsetHeight + 32, maxHeight);
+      
       const canvas = await window.html2canvas(el, {
         backgroundColor: '#f5f0e8',
         scale: 2,
@@ -5830,7 +5899,8 @@ export default function App() {
         x: -16,
         y: -16,
         width: el.offsetWidth + 32,
-        height: el.offsetHeight + 32
+        height: actualHeight,
+        windowHeight: actualHeight + 100
       });
       
       // 移除临时样式
@@ -5877,7 +5947,91 @@ export default function App() {
       }
     } catch (err) {
       console.error('导出失败:', err);
-      showToast('导出失败，请稍后重试');
+      showToast('导出失败，内容过长或请稍后重试');
+    }
+  };
+
+  // 通用导出元素为图片函数（供子组件调用）
+  const exportElementAsImage = async (el, title) => {
+    if (!el) return;
+    
+    showToast('正在生成图片...');
+    
+    try {
+      if (!window.html2canvas) {
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+        document.head.appendChild(script);
+        
+        await new Promise((resolve, reject) => {
+          script.onload = resolve;
+          script.onerror = reject;
+        });
+        
+        await new Promise(r => setTimeout(r, 100));
+      }
+      
+      // 临时添加导出样式
+      el.style.background = '#fff';
+      el.style.borderRadius = '16px';
+      el.style.padding = '24px 20px';
+      el.style.boxShadow = '0 4px 20px rgba(45,48,71,.1)';
+      
+      const maxHeight = 10000;
+      const actualHeight = Math.min(el.offsetHeight + 32, maxHeight);
+      
+      const canvas = await window.html2canvas(el, {
+        backgroundColor: '#f5f0e8',
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        x: -16,
+        y: -16,
+        width: el.offsetWidth + 32,
+        height: actualHeight,
+        windowHeight: actualHeight + 100
+      });
+      
+      // 移除临时样式
+      el.style.background = '';
+      el.style.borderRadius = '';
+      el.style.padding = '';
+      el.style.boxShadow = '';
+      
+      const fileName = `${title || '导出'}_${Date.now()}.png`;
+      
+      if (isCapacitor()) {
+        await loadCapacitor();
+        if (Filesystem && Share) {
+          const dataUrl = canvas.toDataURL('image/png');
+          const base64Data = dataUrl.replace(/^data:image\/png;base64,/, '');
+          
+          const result = await Filesystem.writeFile({
+            path: fileName,
+            data: base64Data,
+            directory: Directory.Cache
+          });
+          
+          await Share.share({
+            title: fileName,
+            url: result.uri,
+            dialogTitle: '保存图片'
+          });
+          
+          showToast('图片已生成');
+        } else {
+          throw new Error('Capacitor modules not loaded');
+        }
+      } else {
+        const link = document.createElement('a');
+        link.download = fileName;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+        showToast('图片已保存');
+      }
+    } catch (err) {
+      console.error('导出失败:', err);
+      showToast('导出失败，内容过长或请稍后重试');
     }
   };
 
@@ -6150,7 +6304,7 @@ export default function App() {
   onSave={handleSaveStoryEdit}
   editingItem={storyEditItem}
   type={storyEditType}
-/><CharacterEditModal isOpen={showCharacterModal} onClose={() => { setShowCharacterModal(false); setEditingCharacter(null); }} onSave={editingCharacter ? handleUpdateCharacter : handleAddCharacter} editingEntry={editingCharacter} /><RelationNetworkPage isOpen={showRelationNetwork} onClose={() => setShowRelationNetwork(false)} entries={currentEntry?.children || []} relations={currentEntry?.characterRelations || []} onAddRelation={handleAddRelation} onDeleteRelation={handleDeleteRelation} onUpdateRelation={handleUpdateRelation} bookTitle={currentEntry?.title || ''} cardStyle={characterCardStyle} allTitlesMap={allTitlesMap} onLinkClick={handleLinkClick} /><AddEraModal isOpen={showAddEraModal} onClose={() => { setShowAddEraModal(false); setEditingEra(null); }} onSave={editingEra ? handleUpdateEra : handleAddEra} editingEra={editingEra} /><AddYearModal isOpen={showAddYearModal} onClose={() => { setShowAddYearModal(false); setEditingYear(null); }} onSave={editingYear ? handleUpdateYear : handleAddYear} editingYear={editingYear} eras={currentEntry?.timelineConfig?.eras || []} /><AddEventModal isOpen={showAddEventModal} onClose={() => { setShowAddEventModal(false); setEditingEvent(null); }} onSave={editingEvent ? handleUpdateTimelineEvent : handleAddTimelineEvent} editingEvent={editingEvent} eras={currentEntry?.timelineConfig?.eras || []} years={currentEntry?.timelineConfig?.years || []} allTitlesMap={allTitlesMap} /><AddSubTimelineModal isOpen={showAddSubTimelineModal} onClose={() => setShowAddSubTimelineModal(false)} onSave={handleAddSubTimeline} eras={currentEntry?.timelineConfig?.eras || []} characters={[]} /><SubTimelineListPage isOpen={showSubTimelines} onClose={() => setShowSubTimelines(false)} subTimelines={currentEntry?.timelineConfig?.subTimelines || []} eras={currentEntry?.timelineConfig?.eras || []} onSelect={(st) => { setCurrentSubTimeline(st); setShowSubTimelines(false); }} onAdd={() => { setShowSubTimelines(false); setShowAddSubTimelineModal(true); }} onDelete={handleDeleteSubTimeline} />{showCharacterDetail && (<CharacterDetailPage entry={showCharacterDetail} onClose={() => setShowCharacterDetail(null)} onSave={(updatedEntry) => { setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, updatedEntry.id, { content: updatedEntry.content }) } : b) })); setShowCharacterDetail({ ...showCharacterDetail, content: updatedEntry.content }); }} isReadOnly={!!visitingBookshelf} cardStyle={characterCardStyle} allTitlesMap={allTitlesMap} onLinkClick={(kw, bookId, entryId) => { setShowCharacterDetail(null); handleLinkClick(kw, bookId, entryId); }} bookName={currentBook?.title} />)}{toast.show && <div className="app-toast">{toast.message}</div>}<style>{styles}</style></div>);
+/><CharacterEditModal isOpen={showCharacterModal} onClose={() => { setShowCharacterModal(false); setEditingCharacter(null); }} onSave={editingCharacter ? handleUpdateCharacter : handleAddCharacter} editingEntry={editingCharacter} /><RelationNetworkPage isOpen={showRelationNetwork} onClose={() => setShowRelationNetwork(false)} entries={currentEntry?.children || []} relations={currentEntry?.characterRelations || []} onAddRelation={handleAddRelation} onDeleteRelation={handleDeleteRelation} onUpdateRelation={handleUpdateRelation} bookTitle={currentEntry?.title || ''} cardStyle={characterCardStyle} allTitlesMap={allTitlesMap} onLinkClick={handleLinkClick} /><AddEraModal isOpen={showAddEraModal} onClose={() => { setShowAddEraModal(false); setEditingEra(null); }} onSave={editingEra ? handleUpdateEra : handleAddEra} editingEra={editingEra} /><AddYearModal isOpen={showAddYearModal} onClose={() => { setShowAddYearModal(false); setEditingYear(null); }} onSave={editingYear ? handleUpdateYear : handleAddYear} editingYear={editingYear} eras={currentEntry?.timelineConfig?.eras || []} /><AddEventModal isOpen={showAddEventModal} onClose={() => { setShowAddEventModal(false); setEditingEvent(null); }} onSave={editingEvent ? handleUpdateTimelineEvent : handleAddTimelineEvent} editingEvent={editingEvent} eras={currentEntry?.timelineConfig?.eras || []} years={currentEntry?.timelineConfig?.years || []} allTitlesMap={allTitlesMap} /><AddSubTimelineModal isOpen={showAddSubTimelineModal} onClose={() => setShowAddSubTimelineModal(false)} onSave={handleAddSubTimeline} eras={currentEntry?.timelineConfig?.eras || []} characters={[]} /><SubTimelineListPage isOpen={showSubTimelines} onClose={() => setShowSubTimelines(false)} subTimelines={currentEntry?.timelineConfig?.subTimelines || []} eras={currentEntry?.timelineConfig?.eras || []} onSelect={(st) => { setCurrentSubTimeline(st); setShowSubTimelines(false); }} onAdd={() => { setShowSubTimelines(false); setShowAddSubTimelineModal(true); }} onDelete={handleDeleteSubTimeline} />{showCharacterDetail && (<CharacterDetailPage entry={showCharacterDetail} onClose={() => setShowCharacterDetail(null)} onSave={(updatedEntry) => { setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, updatedEntry.id, { content: updatedEntry.content }) } : b) })); setShowCharacterDetail({ ...showCharacterDetail, content: updatedEntry.content }); }} isReadOnly={!!visitingBookshelf} cardStyle={characterCardStyle} allTitlesMap={allTitlesMap} onLinkClick={(kw, bookId, entryId) => { setShowCharacterDetail(null); handleLinkClick(kw, bookId, entryId); }} bookName={currentBook?.title} onExportImage={exportElementAsImage} />)}{toast.show && <div className="app-toast">{toast.message}</div>}<style>{styles}</style></div>);
 }
 
 const styles = `
