@@ -1,6 +1,32 @@
 import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
+// Capacitor 文件系统（移动端导出用）
+let Filesystem = null;
+let Directory = null;
+let Share = null;
+
+// 动态加载 Capacitor 模块
+const loadCapacitor = async () => {
+  if (Filesystem) return true;
+  try {
+    const fsModule = await import('@capacitor/filesystem');
+    Filesystem = fsModule.Filesystem;
+    Directory = fsModule.Directory;
+    const shareModule = await import('@capacitor/share');
+    Share = shareModule.Share;
+    return true;
+  } catch (e) {
+    console.log('Capacitor not available, using web fallback');
+    return false;
+  }
+};
+
+// 检测是否在 Capacitor 环境
+const isCapacitor = () => {
+  return window.Capacitor?.isNativePlatform?.() || false;
+};
+
 // Supabase 配置
 const SUPABASE_URL = 'https://phlughyikkretphpkuoc.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBobHVnaHlpa2tyZXRwaHBrdW9jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ3NTU1OTgsImV4cCI6MjA4MDMzMTU5OH0.WAYl4ZS8-vm_y48dAwW1Jc_DJduTFyZAgq-D5xqJ--8';
@@ -3723,7 +3749,7 @@ export default function App() {
   };
 
   // 导出书籍为.yyd文件
-  const exportBook = (book) => {
+  const exportBook = async (book) => {
     try {
       const exportData = {
         version: '1.0',
@@ -3742,18 +3768,46 @@ export default function App() {
       };
       
       const jsonStr = JSON.stringify(exportData, null, 2);
-      const blob = new Blob([jsonStr], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
+      const fileName = `${book.title}.yyd`;
       
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${book.title}.yyd`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      
-      showToast(`已导出「${book.title}」`);
+      // 移动端使用 Capacitor
+      if (isCapacitor()) {
+        await loadCapacitor();
+        if (Filesystem && Share) {
+          // 先保存到缓存目录
+          const result = await Filesystem.writeFile({
+            path: fileName,
+            data: btoa(unescape(encodeURIComponent(jsonStr))),
+            directory: Directory.Cache
+          });
+          
+          // 然后触发分享（让用户选择保存位置）
+          await Share.share({
+            title: `导出「${book.title}」`,
+            text: `一页穹顶书籍文件`,
+            url: result.uri,
+            dialogTitle: '保存书籍文件'
+          });
+          
+          showToast(`已导出「${book.title}」`);
+        } else {
+          throw new Error('Capacitor modules not loaded');
+        }
+      } else {
+        // 网页端使用下载
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showToast(`已导出「${book.title}」`);
+      }
     } catch (err) {
       console.error('导出失败:', err);
       showToast('导出失败');
@@ -5745,6 +5799,8 @@ export default function App() {
     const el = exportRef.current;
     if (!el) return;
     
+    showToast('正在生成图片...');
+    
     // 动态加载 html2canvas
     try {
       if (!window.html2canvas) {
@@ -5783,13 +5839,86 @@ export default function App() {
       el.style.padding = '';
       el.style.boxShadow = '';
       
-      const link = document.createElement('a');
-      link.download = `${currentEntry?.title || '词条'}.png`;
-      link.href = canvas.toDataURL('image/png');
-      link.click();
+      const fileName = `${currentEntry?.title || '词条'}_${Date.now()}.png`;
+      
+      // 移动端使用 Capacitor
+      if (isCapacitor()) {
+        await loadCapacitor();
+        if (Filesystem && Share) {
+          // 获取 base64 数据（去掉前缀）
+          const dataUrl = canvas.toDataURL('image/png');
+          const base64Data = dataUrl.replace(/^data:image\/png;base64,/, '');
+          
+          // 保存到缓存目录
+          const result = await Filesystem.writeFile({
+            path: fileName,
+            data: base64Data,
+            directory: Directory.Cache
+          });
+          
+          // 触发分享让用户保存
+          await Share.share({
+            title: fileName,
+            url: result.uri,
+            dialogTitle: '保存图片'
+          });
+          
+          showToast('图片已生成');
+        } else {
+          throw new Error('Capacitor modules not loaded');
+        }
+      } else {
+        // 网页端使用下载
+        const link = document.createElement('a');
+        link.download = fileName;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+        showToast('图片已保存');
+      }
     } catch (err) {
       console.error('导出失败:', err);
       showToast('导出失败，请稍后重试');
+    }
+  };
+
+  // 保存画廊图片
+  const saveGalleryImage = async (imgSrc) => {
+    try {
+      const fileName = `image_${Date.now()}.png`;
+      
+      if (isCapacitor()) {
+        await loadCapacitor();
+        if (Filesystem && Share) {
+          // 从 base64 或 URL 获取数据
+          let base64Data = imgSrc;
+          if (imgSrc.startsWith('data:')) {
+            base64Data = imgSrc.replace(/^data:image\/[^;]+;base64,/, '');
+          }
+          
+          const result = await Filesystem.writeFile({
+            path: fileName,
+            data: base64Data,
+            directory: Directory.Cache
+          });
+          
+          await Share.share({
+            title: fileName,
+            url: result.uri,
+            dialogTitle: '保存图片'
+          });
+          
+          showToast('图片已保存');
+        }
+      } else {
+        const link = document.createElement('a');
+        link.href = imgSrc;
+        link.download = fileName;
+        link.click();
+        showToast('图片已保存');
+      }
+    } catch (err) {
+      console.error('保存图片失败:', err);
+      showToast('保存失败');
     }
   };
 
@@ -5941,7 +6070,7 @@ export default function App() {
   }
   setGalleryDragX(0);
   if (galleryViewScale < 1.1) setGalleryViewScale(1);
-}} onClick={(e) => { e.stopPropagation(); if (Math.abs(galleryDragX) < 10 && galleryViewScale === 1) closeGalleryPreview(); }}><div className="gallery-viewer-counter">{galleryViewIndex + 1} / {currentBook?.gallery?.images?.length || 0}</div>{galleryViewerMenu && (<><div className="gallery-viewer-menu-overlay" onClick={(e) => { e.stopPropagation(); setGalleryViewerMenu(false); }} /><div className="gallery-viewer-menu"><div className="gallery-viewer-menu-item" onClick={(e) => { e.stopPropagation(); const img = currentBook?.gallery?.images?.[galleryViewIndex]; if (img) { const link = document.createElement('a'); link.href = img.src; link.download = `image_${Date.now()}.png`; link.click(); } setGalleryViewerMenu(false); }}>💾 保存到手机</div><div className="gallery-viewer-menu-item" onClick={(e) => { e.stopPropagation(); setGalleryViewerMenu(false); }}>取消</div></div></>)}<div className="gallery-viewer-track" style={{ transform: `translateX(calc(-${galleryViewIndex * 100}% + ${galleryDragX}px))`, transition: galleryIsDragging ? 'none' : 'transform 0.3s ease-out' }}>{currentBook?.gallery?.images?.map((img, idx) => (<div key={img.id} className="gallery-viewer-slide" onTouchStart={(e) => { if (idx === galleryViewIndex && galleryViewScale === 1) { galleryViewerLongPress.current = setTimeout(() => { if (navigator.vibrate) navigator.vibrate(30); setGalleryViewerMenu(true); }, 500); } }} onTouchEnd={() => { if (galleryViewerLongPress.current) { clearTimeout(galleryViewerLongPress.current); galleryViewerLongPress.current = null; } }} onTouchMove={() => { if (galleryViewerLongPress.current) { clearTimeout(galleryViewerLongPress.current); galleryViewerLongPress.current = null; } }}><img src={img.src} alt="" style={{ transform: `scale(${idx === galleryViewIndex ? galleryViewScale : 1})` }} draggable={false} /></div>))}</div></div>)}{showExportMenu && (<><div className="export-menu-overlay" onClick={() => setShowExportMenu(false)} /><div className="export-menu" style={{ top: exportMenuPos.y - 60, left: Math.min(exportMenuPos.x - 60, window.innerWidth - 140) }}><div className="export-menu-item" onClick={handleExportImage}><span>📷</span><span>导出长图</span></div></div></>)}<BookModal isOpen={showBookModal} onClose={() => { setShowBookModal(false); setEditingBook(null); }} onSave={handleAddBook} editingBook={editingBook} />{showStoryBookPage && currentBook && (
+}} onClick={(e) => { e.stopPropagation(); if (Math.abs(galleryDragX) < 10 && galleryViewScale === 1) closeGalleryPreview(); }}><div className="gallery-viewer-counter">{galleryViewIndex + 1} / {currentBook?.gallery?.images?.length || 0}</div>{galleryViewerMenu && (<><div className="gallery-viewer-menu-overlay" onClick={(e) => { e.stopPropagation(); setGalleryViewerMenu(false); }} /><div className="gallery-viewer-menu"><div className="gallery-viewer-menu-item" onClick={(e) => { e.stopPropagation(); const img = currentBook?.gallery?.images?.[galleryViewIndex]; if (img) { saveGalleryImage(img.src); } setGalleryViewerMenu(false); }}>💾 保存到手机</div><div className="gallery-viewer-menu-item" onClick={(e) => { e.stopPropagation(); setGalleryViewerMenu(false); }}>取消</div></div></>)}<div className="gallery-viewer-track" style={{ transform: `translateX(calc(-${galleryViewIndex * 100}% + ${galleryDragX}px))`, transition: galleryIsDragging ? 'none' : 'transform 0.3s ease-out' }}>{currentBook?.gallery?.images?.map((img, idx) => (<div key={img.id} className="gallery-viewer-slide" onTouchStart={(e) => { if (idx === galleryViewIndex && galleryViewScale === 1) { galleryViewerLongPress.current = setTimeout(() => { if (navigator.vibrate) navigator.vibrate(30); setGalleryViewerMenu(true); }, 500); } }} onTouchEnd={() => { if (galleryViewerLongPress.current) { clearTimeout(galleryViewerLongPress.current); galleryViewerLongPress.current = null; } }} onTouchMove={() => { if (galleryViewerLongPress.current) { clearTimeout(galleryViewerLongPress.current); galleryViewerLongPress.current = null; } }}><img src={img.src} alt="" style={{ transform: `scale(${idx === galleryViewIndex ? galleryViewScale : 1})` }} draggable={false} /></div>))}</div></div>)}{showExportMenu && (<><div className="export-menu-overlay" onClick={() => setShowExportMenu(false)} /><div className="export-menu" style={{ top: exportMenuPos.y - 60, left: Math.min(exportMenuPos.x - 60, window.innerWidth - 140) }}><div className="export-menu-item" onClick={handleExportImage}><span>📷</span><span>导出长图</span></div></div></>)}<BookModal isOpen={showBookModal} onClose={() => { setShowBookModal(false); setEditingBook(null); }} onSave={handleAddBook} editingBook={editingBook} />{showStoryBookPage && currentBook && (
   <StoryBookPage book={currentBook} onClose={() => setShowStoryBookPage(false)} onEnterToc={handleEnterStoryToc} />
 )}{showStoryToc && currentBook && (
   <StoryTocPage 
