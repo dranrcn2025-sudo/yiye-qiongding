@@ -3721,6 +3721,184 @@ export default function App() {
     setToast({ show: true, message });
     setTimeout(() => setToast({ show: false, message: '' }), duration);
   };
+
+  // 导出书籍为.yyd文件
+  const exportBook = (book) => {
+    try {
+      const exportData = {
+        version: '1.0',
+        type: 'yyd-book',
+        exportTime: new Date().toISOString(),
+        book: {
+          title: book.title,
+          author: book.author,
+          cover: book.cover,
+          color: book.color,
+          coverImage: book.coverImage,
+          entries: book.entries,
+          gallery: book.gallery,
+          settings: book.settings
+        }
+      };
+      
+      const jsonStr = JSON.stringify(exportData, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${book.title}.yyd`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      showToast(`已导出「${book.title}」`);
+    } catch (err) {
+      console.error('导出失败:', err);
+      showToast('导出失败');
+    }
+  };
+
+  // 递归重新生成所有ID
+  const regenerateIds = (entries, idMap = new Map()) => {
+    return entries.map(entry => {
+      const oldId = entry.id;
+      const newId = generateId();
+      idMap.set(oldId, newId);
+      
+      const newEntry = {
+        ...entry,
+        id: newId
+      };
+      
+      // 处理人物关系中的ID引用
+      if (entry.characterRelations) {
+        newEntry.characterRelations = entry.characterRelations.map(rel => ({
+          ...rel,
+          id: generateId(),
+          from: idMap.get(rel.from) || rel.from,
+          to: idMap.get(rel.to) || rel.to
+        }));
+      }
+      
+      // 处理时间轴配置中的ID
+      if (entry.timelineConfig) {
+        const eraIdMap = new Map();
+        const yearIdMap = new Map();
+        
+        newEntry.timelineConfig = {
+          eras: (entry.timelineConfig.eras || []).map(era => {
+            const newEraId = generateId();
+            eraIdMap.set(era.id, newEraId);
+            return { ...era, id: newEraId };
+          }),
+          years: (entry.timelineConfig.years || []).map(year => {
+            const newYearId = generateId();
+            yearIdMap.set(year.id, newYearId);
+            return { 
+              ...year, 
+              id: newYearId,
+              eraId: eraIdMap.get(year.eraId) || year.eraId
+            };
+          }),
+          events: (entry.timelineConfig.events || []).map(event => ({
+            ...event,
+            id: generateId(),
+            yearId: yearIdMap.get(event.yearId) || event.yearId
+          })),
+          subTimelines: (entry.timelineConfig.subTimelines || []).map(st => ({
+            ...st,
+            id: generateId()
+          }))
+        };
+      }
+      
+      // 递归处理子条目
+      if (entry.children?.length > 0) {
+        newEntry.children = regenerateIds(entry.children, idMap);
+      }
+      
+      return newEntry;
+    });
+  };
+
+  // 导入书籍文件的ref
+  const importBookRef = useRef(null);
+
+  // 导入书籍
+  const handleImportYYD = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    try {
+      const text = await file.text();
+      const importData = JSON.parse(text);
+      
+      // 校验文件格式
+      if (importData.type !== 'yyd-book' || !importData.book) {
+        showToast('文件格式不正确');
+        return;
+      }
+      
+      const bookData = importData.book;
+      
+      // 检查是否已存在同名书籍
+      const existingBook = data.books.find(b => b.title === bookData.title);
+      if (existingBook) {
+        if (!window.confirm(`已存在「${bookData.title}」，是否覆盖？\n选择"取消"将创建副本。`)) {
+          bookData.title = `${bookData.title} (导入)`;
+        } else {
+          // 覆盖：删除旧书
+          setData(prev => ({
+            ...prev,
+            books: prev.books.filter(b => b.id !== existingBook.id)
+          }));
+        }
+      }
+      
+      // 重新生成所有ID
+      const newEntries = regenerateIds(bookData.entries || []);
+      
+      // 处理画廊图片ID
+      let newGallery = bookData.gallery;
+      if (newGallery?.images) {
+        newGallery = {
+          ...newGallery,
+          images: newGallery.images.map(img => ({
+            ...img,
+            id: generateId()
+          }))
+        };
+      }
+      
+      const newBook = {
+        id: generateId(),
+        title: bookData.title,
+        author: bookData.author || '',
+        cover: bookData.cover || '📚',
+        color: bookData.color || '#8B7355',
+        coverImage: bookData.coverImage || null,
+        entries: newEntries,
+        gallery: newGallery || { enabled: false, images: [] },
+        settings: bookData.settings || {}
+      };
+      
+      setData(prev => ({
+        ...prev,
+        books: [...prev.books, newBook]
+      }));
+      
+      showToast(`已导入「${newBook.title}」`);
+    } catch (err) {
+      console.error('导入失败:', err);
+      showToast('导入失败，请检查文件格式');
+    }
+    
+    // 清空input以允许重复选择同一文件
+    e.target.value = '';
+  };
+
   // 返航动画
   const [isReturningHome, setIsReturningHome] = useState(false);
   const [showReturnConfirm, setShowReturnConfirm] = useState(false);
@@ -4321,6 +4499,7 @@ export default function App() {
         opts = [
           { icon: '✏️', label: '编辑', action: () => { setEditingBook(item); setShowBookModal(true); } }, 
           { icon: '↕️', label: '移动', action: () => { setIsBookReorderMode(true); setDraggingBookId(item.id); } },
+          { icon: '📤', label: '导出书籍', action: () => exportBook(item) },
           { icon: '🗑️', label: '删除', danger: true, action: () => setConfirmModal({ isOpen: true, title: '确认删除', message: `删除「${item.title}」？`, onConfirm: () => { setData(prev => ({ ...prev, books: prev.books.filter(b => b.id !== item.id) })); setConfirmModal({ isOpen: false }); } }) }
         ]; 
       } 
@@ -5677,7 +5856,7 @@ export default function App() {
       }
     }
     setShelfOverscroll(0);
-  }}>{pages.map((pageBooks, pageIndex) => (<div key={pageIndex} className="bookshelf-page"><div className="bookshelf-grid">{pageBooks.map((b, bookIndexInPage) => { const globalIndex = pageIndex * booksPerPage + bookIndexInPage; return b.isAddButton ? (<div key="add" className="book-card add-book" onClick={() => { setEditingBook(null); setShowBookModal(true); }}><div className="book-cover"><span className="add-icon">+</span></div><div className="book-meta"><h2>新建世界</h2></div></div>) : (<div key={b.id} className={`book-card ${isBookReorderMode && draggingBookId === b.id ? 'dragging' : ''} ${isBookReorderMode ? 'reorder-mode' : ''}`} style={{ '--book-color': b.color || '#8B7355' }} onClick={() => !isBookReorderMode && handleBookSelect(b)} onTouchStart={e => { e.stopPropagation(); if (!isVisiting && !isBookReorderMode) handleLongPressStart(e, 'book', b); }} onTouchEnd={!isVisiting ? handleLongPressEnd : undefined} onTouchMove={!isVisiting ? handleLongPressEnd : undefined}><div className="book-spine" /><div className="book-cover">{b.coverImage ? <img src={b.coverImage} alt="" className="cover-image" /> : <span className="book-emoji">{b.cover}</span>}</div><div className="book-shadow" /><div className="book-meta"><h2>{b.title}</h2>{b.author && <p>{b.author} 著</p>}</div>{isBookReorderMode && draggingBookId !== b.id && (<div className="book-drop-zone" onClick={(e) => { e.stopPropagation(); handleMoveBook(draggingBookId, globalIndex); }}>放这里</div>)}</div>); })}</div></div>))}</div>{isVisiting && <div className="return-hint">↓ 轻触星球返航 ↓</div>}{totalPages > 1 && (<div className="shelf-page-dots">{pages.map((_, i) => (<span key={i} className={`shelf-dot ${shelfPage === i ? 'active' : ''}`} onClick={() => { shelfRef.current?.scrollTo({ left: i * shelfRef.current.clientWidth, behavior: 'smooth' }); }} />))}</div>)}<BookModal isOpen={showBookModal} onClose={() => { setShowBookModal(false); setEditingBook(null); }} onSave={handleAddBook} editingBook={editingBook} /><ContextMenu isOpen={contextMenu.isOpen} position={contextMenu.position} onClose={() => setContextMenu({ ...contextMenu, isOpen: false })} options={contextMenu.options} /><ConfirmModal isOpen={confirmModal.isOpen} title={confirmModal.title} message={confirmModal.message} onConfirm={confirmModal.onConfirm} onCancel={() => setConfirmModal({ isOpen: false })} /><SearchModal isOpen={showSearch} onClose={() => { setShowSearch(false); setSearchQuery(''); setSearchResults([]); }} query={searchQuery} setQuery={setSearchQuery} results={searchResults} onSearch={performSearch} onResultClick={handleSearchResultClick} />{showProfile && (<div className={`profile-page ${profileClosing ? 'closing' : ''}`} style={userBg ? { backgroundImage: `url(${userBg})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}}><div className="profile-bg-overlay" /><div className="profile-header"><button className="profile-close" onClick={closeProfile}>×</button><div className="profile-avatar" onClick={() => avatarUploadRef.current?.click()}>{userAvatar ? <img src={userAvatar} alt="" /> : '✨'}</div><input ref={avatarUploadRef} type="file" accept="image/*" onChange={handleAvatarUpload} style={{ display: 'none' }} /><input type="text" className="profile-name" value={userName} onChange={e => saveUserName(e.target.value)} placeholder="点击编辑名字" /><input type="text" className="profile-shelf-title" value={userShelfTitle} onChange={e => saveShelfTitle(e.target.value)} placeholder="自定义书架标题（访客可见）" /><textarea className="profile-bio" value={userBio} onChange={e => saveUserBio(e.target.value)} placeholder="写一句简介..." rows={2} /></div><div className="profile-stats"><div className="stat-item"><span className="stat-number">{totalStats.books}</span><span className="stat-label">作品</span></div><div className="stat-item"><span className="stat-number">{totalStats.entries}</span><span className="stat-label">词条</span></div><div className="stat-item"><span className="stat-number">{totalStats.words.toLocaleString()}</span><span className="stat-label">总字数</span></div></div><div className="profile-menu"><div className="profile-menu-item" onClick={closeProfile}><span>📚</span><span>我的书架</span><span className="menu-arrow">›</span></div><div className="profile-menu-item" onClick={() => setShowLibrary(true)}><span>📖</span><span>图书馆 ({library.books.length})</span><span className="menu-arrow">›</span></div><div className="profile-menu-item" onClick={() => setShowTotalGallery(true)}><span>🖼️</span><span>画廊 ({totalStats.images})</span><span className="menu-arrow">›</span></div><div className="profile-menu-item" onClick={() => bgUploadRef.current?.click()}><span>🎨</span><span>更换背景</span><span className="menu-arrow">›</span></div><input ref={bgUploadRef} type="file" accept="image/*" onChange={handleBgUpload} style={{ display: 'none' }} /><div className="profile-menu-item" onClick={() => setShowSettings(true)}><span>⚙️</span><span>设置</span><span className="menu-arrow">›</span></div><div className="profile-menu-item"><span>💡</span><span>关于一页穹顶</span><span className="menu-arrow">›</span></div></div><div className="profile-bottom-bar"><div className="profile-account-status">{user ? (<div className="logged-in"><span className="sync-indicator" data-status={syncStatus}></span><span>{user.email}</span></div>) : (<button className="login-btn" onClick={() => { setShowAuthModal(true); setAuthMode('login'); }}>登录 / 注册</button>)}</div><div className="profile-version">一页穹顶 v1.0</div></div></div>)}{showTotalGallery && (<div className={`total-gallery-page ${galleryClosing ? "closing" : ""}`}><div className="gallery-header"><button className="gallery-back" onClick={closeGallery}>←</button><h2>画廊</h2><span></span></div><div className="total-gallery-list">{data.books.filter(b => b.gallery?.enabled).map(book => (<div key={book.id} className="total-gallery-book"><div className="total-gallery-book-header" onClick={() => { setCurrentBook(book); setShowTotalGallery(false); closeProfile(); setTimeout(() => setShowGallery(true), 300); }}><span className="book-icon">{book.coverImage ? <img src={book.coverImage} alt="" /> : book.cover}</span><span className="book-title">{book.title}</span><span className="book-count">{book.gallery.images?.length || 0}张</span></div><div className="total-gallery-book-images">{book.gallery.images?.slice(0, 3).map(img => (<div key={img.id} className="total-gallery-thumb" onClick={() => { setCurrentBook(book); setShowTotalGallery(false); closeProfile(); setTimeout(() => setShowGallery(true), 300); }}><img src={img.src} alt="" /></div>))}<label className="total-gallery-add-btn"><input type="file" accept="image/*" multiple onChange={(e) => { const files = e.target.files; if (!files?.length) return; Array.from(files).forEach(file => { const reader = new FileReader(); reader.onload = (ev) => { const newImg = { id: Date.now().toString() + Math.random(), src: ev.target.result, featured: false }; setData(prev => ({ ...prev, books: prev.books.map(b => b.id === book.id ? { ...b, gallery: { ...b.gallery, images: [...(b.gallery.images || []), newImg] } } : b) })); }; reader.readAsDataURL(file); }); e.target.value = ''; }} style={{ display: 'none' }} /><span>+</span></label></div></div>))}{data.books.filter(b => b.gallery?.enabled).length === 0 && (<div className="gallery-empty"><span>🖼️</span><p>还没有任何画廊</p><p>在书籍中开启画廊功能</p></div>)}</div></div>)}{showLibrary && (<div className={`library-page ${libraryClosing ? "closing" : ""}`}><div className="library-header"><button className="library-back" onClick={closeLibrary}>←</button><h2>图书馆</h2><label className="library-import-btn">{importLoading ? '导入中...' : '📥 导入'}<input ref={libraryUploadRef} type="file" accept=".txt,.epub" onChange={handleImportBook} style={{ display: 'none' }} disabled={importLoading} /></label></div><div className="library-hint">支持导入 txt、epub 格式的电子书</div><div className="library-list">{library.books.map(book => (<div key={book.id} className="library-book-item"><div className="library-book-cover">{book.type === 'epub' ? '📕' : '📄'}{book.bookmark && <span className="library-bookmark-badge">🔖</span>}</div><div className="library-book-info" onClick={() => openLibraryBook(book)}><h3>{book.title}</h3><p>{book.author} · {book.chapters.length}章</p><p className="library-book-time">{new Date(book.importTime).toLocaleDateString()}{book.bookmark && ` · 已读至第${book.bookmark.chapterIndex + 1}章`}</p></div><button className="library-book-delete" onClick={(e) => { e.stopPropagation(); handleDeleteLibraryBook(book.id, book.title); }}>🗑️</button></div>))}{library.books.length === 0 && (<div className="library-empty"><span>📚</span><p>图书馆空空如也</p><p>点击右上角导入电子书</p></div>)}</div><ConfirmModal isOpen={confirmModal.isOpen} title={confirmModal.title} message={confirmModal.message} onConfirm={confirmModal.onConfirm} onCancel={() => setConfirmModal({ isOpen: false })} /></div>)}{showLibraryReader && libraryBook && (<StoryReader book={{ title: libraryBook.title }} chapter={libraryBook.chapters[libraryChapterIndex]} novelModeEntry={null} allChapters={libraryBook.chapters} currentChapterIndex={libraryChapterIndex} onClose={() => setShowLibraryReader(false)} onChangeChapter={(ch) => { const idx = libraryBook.chapters.findIndex(c => c.id === ch.id); if (idx >= 0) setLibraryChapterIndex(idx); }} onEdit={() => {}} settings={storySettings} onChangeSettings={setStorySettings} isLibraryMode={true} isBookmarked={libraryBook.bookmark !== null} onToggleBookmark={toggleLibraryBookmark} initialPage={libraryBook.bookmark?.page || 0} />)}<AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} mode={authMode} setMode={setAuthMode} showToast={showToast} />{showRocketModal && (<RocketModal isOpen={showRocketModal} onClose={() => setShowRocketModal(false)} onFly={flyToCoordinate} showToast={showToast} onLaunchStart={() => setLaunchAnimating('up')} />)}<SettingsPage isOpen={showSettings} isClosing={settingsClosing} onClose={closeSettings} user={user} onLogout={async () => { await supabase.auth.signOut(); closeSettings(); }} myInviteCode={myInviteCode} onGenerateCode={generateInviteCode} onResetCode={resetInviteCode} formatCoordinate={formatCoordinate} syncStatus={syncStatus} lastSyncTime={lastSyncTime} onSyncNow={() => { saveToCloud(data); }} showRocketBtn={showRocketBtn} onToggleRocketBtn={toggleRocketBtn} showToast={showToast} characterCardStyle={characterCardStyle} onChangeCardStyle={changeCardStyle} />{showReturnConfirm && (<div className="return-confirm-overlay" onClick={() => setShowReturnConfirm(false)}><div className="return-confirm-modal" onClick={e => e.stopPropagation()}><div className="rocket-icon">🚀</div><h3>确认返航？</h3><p>即将返回你自己的书架</p><div className="return-confirm-actions"><button className="stay-btn" onClick={() => setShowReturnConfirm(false)}>再看看</button><button className="go-btn" onClick={confirmReturn}>返航</button></div></div></div>)}{toast.show && <div className="app-toast">{toast.message}</div>}<style>{styles}</style></div>);
+  }}>{pages.map((pageBooks, pageIndex) => (<div key={pageIndex} className="bookshelf-page"><div className="bookshelf-grid">{pageBooks.map((b, bookIndexInPage) => { const globalIndex = pageIndex * booksPerPage + bookIndexInPage; return b.isAddButton ? (<div key="add" className="book-card add-book" onClick={() => { setEditingBook(null); setShowBookModal(true); }}><div className="book-cover"><span className="add-icon">+</span></div><div className="book-meta"><h2>新建世界</h2></div></div>) : (<div key={b.id} className={`book-card ${isBookReorderMode && draggingBookId === b.id ? 'dragging' : ''} ${isBookReorderMode ? 'reorder-mode' : ''}`} style={{ '--book-color': b.color || '#8B7355' }} onClick={() => !isBookReorderMode && handleBookSelect(b)} onTouchStart={e => { e.stopPropagation(); if (!isVisiting && !isBookReorderMode) handleLongPressStart(e, 'book', b); }} onTouchEnd={!isVisiting ? handleLongPressEnd : undefined} onTouchMove={!isVisiting ? handleLongPressEnd : undefined}><div className="book-spine" /><div className="book-cover">{b.coverImage ? <img src={b.coverImage} alt="" className="cover-image" /> : <span className="book-emoji">{b.cover}</span>}</div><div className="book-shadow" /><div className="book-meta"><h2>{b.title}</h2>{b.author && <p>{b.author} 著</p>}</div>{isBookReorderMode && draggingBookId !== b.id && (<div className="book-drop-zone" onClick={(e) => { e.stopPropagation(); handleMoveBook(draggingBookId, globalIndex); }}>放这里</div>)}</div>); })}</div></div>))}</div>{isVisiting && <div className="return-hint">↓ 轻触星球返航 ↓</div>}{totalPages > 1 && (<div className="shelf-page-dots">{pages.map((_, i) => (<span key={i} className={`shelf-dot ${shelfPage === i ? 'active' : ''}`} onClick={() => { shelfRef.current?.scrollTo({ left: i * shelfRef.current.clientWidth, behavior: 'smooth' }); }} />))}</div>)}<BookModal isOpen={showBookModal} onClose={() => { setShowBookModal(false); setEditingBook(null); }} onSave={handleAddBook} editingBook={editingBook} /><ContextMenu isOpen={contextMenu.isOpen} position={contextMenu.position} onClose={() => setContextMenu({ ...contextMenu, isOpen: false })} options={contextMenu.options} /><ConfirmModal isOpen={confirmModal.isOpen} title={confirmModal.title} message={confirmModal.message} onConfirm={confirmModal.onConfirm} onCancel={() => setConfirmModal({ isOpen: false })} /><SearchModal isOpen={showSearch} onClose={() => { setShowSearch(false); setSearchQuery(''); setSearchResults([]); }} query={searchQuery} setQuery={setSearchQuery} results={searchResults} onSearch={performSearch} onResultClick={handleSearchResultClick} />{showProfile && (<div className={`profile-page ${profileClosing ? 'closing' : ''}`} style={userBg ? { backgroundImage: `url(${userBg})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}}><div className="profile-bg-overlay" /><div className="profile-header"><button className="profile-close" onClick={closeProfile}>×</button><div className="profile-avatar" onClick={() => avatarUploadRef.current?.click()}>{userAvatar ? <img src={userAvatar} alt="" /> : '✨'}</div><input ref={avatarUploadRef} type="file" accept="image/*" onChange={handleAvatarUpload} style={{ display: 'none' }} /><input type="text" className="profile-name" value={userName} onChange={e => saveUserName(e.target.value)} placeholder="点击编辑名字" /><input type="text" className="profile-shelf-title" value={userShelfTitle} onChange={e => saveShelfTitle(e.target.value)} placeholder="自定义书架标题（访客可见）" /><textarea className="profile-bio" value={userBio} onChange={e => saveUserBio(e.target.value)} placeholder="写一句简介..." rows={2} /></div><div className="profile-stats"><div className="stat-item"><span className="stat-number">{totalStats.books}</span><span className="stat-label">作品</span></div><div className="stat-item"><span className="stat-number">{totalStats.entries}</span><span className="stat-label">词条</span></div><div className="stat-item"><span className="stat-number">{totalStats.words.toLocaleString()}</span><span className="stat-label">总字数</span></div></div><div className="profile-menu"><div className="profile-menu-item" onClick={closeProfile}><span>📚</span><span>我的书架</span><span className="menu-arrow">›</span></div><div className="profile-menu-item" onClick={() => setShowLibrary(true)}><span>📖</span><span>图书馆 ({library.books.length})</span><span className="menu-arrow">›</span></div><div className="profile-menu-item" onClick={() => setShowTotalGallery(true)}><span>🖼️</span><span>画廊 ({totalStats.images})</span><span className="menu-arrow">›</span></div><label className="profile-menu-item"><span>📥</span><span>导入书籍 (.yyd)</span><span className="menu-arrow">›</span><input ref={importBookRef} type="file" accept=".yyd,.json" onChange={handleImportYYD} style={{ display: 'none' }} /></label><div className="profile-menu-item" onClick={() => bgUploadRef.current?.click()}><span>🎨</span><span>更换背景</span><span className="menu-arrow">›</span></div><input ref={bgUploadRef} type="file" accept="image/*" onChange={handleBgUpload} style={{ display: 'none' }} /><div className="profile-menu-item" onClick={() => setShowSettings(true)}><span>⚙️</span><span>设置</span><span className="menu-arrow">›</span></div><div className="profile-menu-item"><span>💡</span><span>关于一页穹顶</span><span className="menu-arrow">›</span></div></div><div className="profile-bottom-bar"><div className="profile-account-status">{user ? (<div className="logged-in"><span className="sync-indicator" data-status={syncStatus}></span><span>{user.email}</span></div>) : (<button className="login-btn" onClick={() => { setShowAuthModal(true); setAuthMode('login'); }}>登录 / 注册</button>)}</div><div className="profile-version">一页穹顶 v1.0</div></div></div>)}{showTotalGallery && (<div className={`total-gallery-page ${galleryClosing ? "closing" : ""}`}><div className="gallery-header"><button className="gallery-back" onClick={closeGallery}>←</button><h2>画廊</h2><span></span></div><div className="total-gallery-list">{data.books.filter(b => b.gallery?.enabled).map(book => (<div key={book.id} className="total-gallery-book"><div className="total-gallery-book-header" onClick={() => { setCurrentBook(book); setShowTotalGallery(false); closeProfile(); setTimeout(() => setShowGallery(true), 300); }}><span className="book-icon">{book.coverImage ? <img src={book.coverImage} alt="" /> : book.cover}</span><span className="book-title">{book.title}</span><span className="book-count">{book.gallery.images?.length || 0}张</span></div><div className="total-gallery-book-images">{book.gallery.images?.slice(0, 3).map(img => (<div key={img.id} className="total-gallery-thumb" onClick={() => { setCurrentBook(book); setShowTotalGallery(false); closeProfile(); setTimeout(() => setShowGallery(true), 300); }}><img src={img.src} alt="" /></div>))}<label className="total-gallery-add-btn"><input type="file" accept="image/*" multiple onChange={(e) => { const files = e.target.files; if (!files?.length) return; Array.from(files).forEach(file => { const reader = new FileReader(); reader.onload = (ev) => { const newImg = { id: Date.now().toString() + Math.random(), src: ev.target.result, featured: false }; setData(prev => ({ ...prev, books: prev.books.map(b => b.id === book.id ? { ...b, gallery: { ...b.gallery, images: [...(b.gallery.images || []), newImg] } } : b) })); }; reader.readAsDataURL(file); }); e.target.value = ''; }} style={{ display: 'none' }} /><span>+</span></label></div></div>))}{data.books.filter(b => b.gallery?.enabled).length === 0 && (<div className="gallery-empty"><span>🖼️</span><p>还没有任何画廊</p><p>在书籍中开启画廊功能</p></div>)}</div></div>)}{showLibrary && (<div className={`library-page ${libraryClosing ? "closing" : ""}`}><div className="library-header"><button className="library-back" onClick={closeLibrary}>←</button><h2>图书馆</h2><label className="library-import-btn">{importLoading ? '导入中...' : '📥 导入'}<input ref={libraryUploadRef} type="file" accept=".txt,.epub" onChange={handleImportBook} style={{ display: 'none' }} disabled={importLoading} /></label></div><div className="library-hint">支持导入 txt、epub 格式的电子书</div><div className="library-list">{library.books.map(book => (<div key={book.id} className="library-book-item"><div className="library-book-cover">{book.type === 'epub' ? '📕' : '📄'}{book.bookmark && <span className="library-bookmark-badge">🔖</span>}</div><div className="library-book-info" onClick={() => openLibraryBook(book)}><h3>{book.title}</h3><p>{book.author} · {book.chapters.length}章</p><p className="library-book-time">{new Date(book.importTime).toLocaleDateString()}{book.bookmark && ` · 已读至第${book.bookmark.chapterIndex + 1}章`}</p></div><button className="library-book-delete" onClick={(e) => { e.stopPropagation(); handleDeleteLibraryBook(book.id, book.title); }}>🗑️</button></div>))}{library.books.length === 0 && (<div className="library-empty"><span>📚</span><p>图书馆空空如也</p><p>点击右上角导入电子书</p></div>)}</div><ConfirmModal isOpen={confirmModal.isOpen} title={confirmModal.title} message={confirmModal.message} onConfirm={confirmModal.onConfirm} onCancel={() => setConfirmModal({ isOpen: false })} /></div>)}{showLibraryReader && libraryBook && (<StoryReader book={{ title: libraryBook.title }} chapter={libraryBook.chapters[libraryChapterIndex]} novelModeEntry={null} allChapters={libraryBook.chapters} currentChapterIndex={libraryChapterIndex} onClose={() => setShowLibraryReader(false)} onChangeChapter={(ch) => { const idx = libraryBook.chapters.findIndex(c => c.id === ch.id); if (idx >= 0) setLibraryChapterIndex(idx); }} onEdit={() => {}} settings={storySettings} onChangeSettings={setStorySettings} isLibraryMode={true} isBookmarked={libraryBook.bookmark !== null} onToggleBookmark={toggleLibraryBookmark} initialPage={libraryBook.bookmark?.page || 0} />)}<AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} mode={authMode} setMode={setAuthMode} showToast={showToast} />{showRocketModal && (<RocketModal isOpen={showRocketModal} onClose={() => setShowRocketModal(false)} onFly={flyToCoordinate} showToast={showToast} onLaunchStart={() => setLaunchAnimating('up')} />)}<SettingsPage isOpen={showSettings} isClosing={settingsClosing} onClose={closeSettings} user={user} onLogout={async () => { await supabase.auth.signOut(); closeSettings(); }} myInviteCode={myInviteCode} onGenerateCode={generateInviteCode} onResetCode={resetInviteCode} formatCoordinate={formatCoordinate} syncStatus={syncStatus} lastSyncTime={lastSyncTime} onSyncNow={() => { saveToCloud(data); }} showRocketBtn={showRocketBtn} onToggleRocketBtn={toggleRocketBtn} showToast={showToast} characterCardStyle={characterCardStyle} onChangeCardStyle={changeCardStyle} />{showReturnConfirm && (<div className="return-confirm-overlay" onClick={() => setShowReturnConfirm(false)}><div className="return-confirm-modal" onClick={e => e.stopPropagation()}><div className="rocket-icon">🚀</div><h3>确认返航？</h3><p>即将返回你自己的书架</p><div className="return-confirm-actions"><button className="stay-btn" onClick={() => setShowReturnConfirm(false)}>再看看</button><button className="go-btn" onClick={confirmReturn}>返航</button></div></div></div>)}{toast.show && <div className="app-toast">{toast.message}</div>}<style>{styles}</style></div>);
 }
 
   return (<div className="app main-view"><div className={`sidebar ${isSidebarOpen ? 'open' : ''}`}><div className="sidebar-header"><h2>{currentBook.title}</h2><button className="close-sidebar" onClick={() => setIsSidebarOpen(false)}>×</button></div><div className="sidebar-content">{currentBook.entries.map(e => <SidebarItem key={e.id} entry={e} onSelect={handleSidebarSelect} currentId={currentEntry?.id} expandedIds={expandedIds} onToggle={id => setExpandedIds(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; })} />)}</div></div>{isSidebarOpen && <div className="sidebar-overlay" onClick={() => setIsSidebarOpen(false)} />}<div className="main-content" onTouchStart={e => { touchStartX.current = e.touches[0].clientX; touchStartY.current = e.touches[0].clientY; }} onTouchEnd={e => { const dx = e.changedTouches[0].clientX - touchStartX.current; const dy = e.changedTouches[0].clientY - touchStartY.current; if (dx > 120 && Math.abs(dx) > Math.abs(dy) * 2) { if (currentEntry || navigationStack.length > 0) { handleBack(); } else { handleBackToShelf(); } } }}><header className="top-bar"><div className="top-left"><button className="icon-btn" onClick={() => setIsSidebarOpen(true)}>☰</button>{(currentEntry || navigationStack.length > 0) && <button className="icon-btn" onClick={handleBack}>←</button>}<button className="icon-btn" onClick={handleBackToShelf}>🏠</button></div><div className="breadcrumb">{isVisitingInBook && <span className="friend-view-badge">👤 {visitingProfile?.name}</span>}<span className="book-name">{currentBook.title}</span>{currentEntry && <><span className="separator">/</span><span className="current-title">{currentEntry.title}</span></>}</div><div className="top-right">{isVisitingInBook ? (<span className="readonly-indicator">只读</span>) : ((viewMode === 'single' || viewMode === 'merged') && (<div className="read-mode-toggle" onClick={() => { if (!isReadOnly) { const ed = document.querySelector('.rich-editor'); if (ed) ed.forceSave?.(); } else if (viewMode === 'merged' && liveEntry) { initMerged(liveEntry); } setIsReadOnly(!isReadOnly); }}><span className={`toggle-label ${isReadOnly ? 'active' : ''}`}>阅读</span><div className={`toggle-switch ${!isReadOnly ? 'edit-mode' : ''}`}><div className="toggle-knob" /></div><span className={`toggle-label ${!isReadOnly ? 'active' : ''}`}>编辑</span></div>))}</div></header>{!currentEntry && currentBook.showStats && (<div className="book-info-card" onClick={() => { if (!isVisitingInBook) { setEditingBook(currentBook); setShowBookModal(true); } }}><div className="info-cover">{currentBook.coverImage ? <img src={currentBook.coverImage} alt="" /> : <span>{currentBook.cover}</span>}</div><div className="info-details">{currentBook.author && <p>作者：{currentBook.author}</p>}{currentBook.tags?.length > 0 && <p>标签：{currentBook.tags.join('、')}</p>}<p>词条：{countEntries(currentBook.entries)}条</p><p>字数：{countWords(currentBook.entries).toLocaleString()}字</p></div>{!isVisitingInBook && <span className="info-edit-hint">点击编辑 ›</span>}</div>)}{!currentEntry && currentBook.gallery?.enabled && (<div className="gallery-preview-strip"><div className="gallery-preview-scroll">{currentBook.gallery.images?.filter(img => img.featured).map(img => (<div key={img.id} className="gallery-strip-item" onClick={() => openGalleryPreview(img)}><img src={img.src} alt="" /></div>))}{(!currentBook.gallery.images?.filter(img => img.featured).length) && !isVisitingInBook && (<div className="gallery-strip-empty" onClick={() => setShowGallery(true)}><span>+</span><p>添加展示图片</p></div>)}</div><button className="gallery-enter-btn" onClick={() => setShowGallery(true)}>进入画廊 ›</button></div>)}<main className={`content-area ${slideAnim}`}>{viewMode === 'list' && !isReorderMode && (<>{currentEntry && <div className="list-header"><h1>{currentEntry.title}</h1>{currentEntry.summary && <p className="summary">{currentEntry.summary}</p>}</div>}<p className="swipe-hint">{isVisitingInBook ? '💡 左滑合并视图 · 右滑返回' : '💡 左滑合并视图 · 右滑返回 · 长按编辑'}</p><div className="entry-list">{currentEntries.map(e => { let tx = 0; return (<div key={e.id} className="entry-card" onClick={() => handleEntryClick(e)} onTouchStart={ev => { tx = ev.touches[0].clientX; if (!isVisitingInBook) handleLongPressStart(ev, 'entry', e); }} onTouchMove={!isVisitingInBook ? handleLongPressEnd : undefined} onTouchEnd={ev => { if (!isVisitingInBook) handleLongPressEnd(); handleEntrySwipe(e, ev.changedTouches[0].clientX - tx); }}><div className="entry-icon">{e.characterMode ? '👤' : e.novelMode ? '📖' : e.timelineMode ? '📅' : e.isFolder ? '📁' : '📄'}</div><div className="entry-info"><h3>{e.title}{e.linkable && <span className="star-badge">⭐</span>}{e.novelMode && <span className="novel-badge">正文</span>}{e.characterMode && <span className="character-badge">人设</span>}{e.timelineMode && <span className="timeline-badge">时间轴</span>}</h3><p>{e.summary}</p></div><span className="entry-arrow">›</span></div>); })}</div>{currentEntries.length === 0 && <div className="empty-state"><span>✨</span><p>{isVisitingInBook ? '这里还没有内容' : '点击右下角添加'}</p></div>}</>)}{(viewMode === 'list' || viewMode === 'character') && isReorderMode && <ReorderList entries={currentEntries} onReorder={handleReorder} onExit={() => setIsReorderMode(false)} />}{viewMode === 'single' && liveEntry && (<div className="single-view"><div className="export-content" ref={exportRef}><div className="content-header">{effectiveReadOnly ? <h1>{liveEntry.title}</h1> : <input type="text" className="editable-title" defaultValue={liveEntry.title} onBlur={ev => handleTitleChange(liveEntry.id, liveEntry.title, ev.target.value)} key={currentEntry.id + '-title'} />}{effectiveReadOnly ? (liveEntry.summary && <p className="entry-summary">{liveEntry.summary}</p>) : <input type="text" className="editable-summary" defaultValue={liveEntry.summary || ''} placeholder="添加简介..." onBlur={ev => handleSummaryChange(liveEntry.id, ev.target.value)} key={currentEntry.id + '-summary'} />}</div><div onTouchStart={effectiveReadOnly ? handleContentLongPressStart : undefined} onTouchEnd={effectiveReadOnly ? handleContentLongPressEnd : undefined} onTouchMove={effectiveReadOnly ? handleContentLongPressEnd : undefined}>{effectiveReadOnly ? <ContentRenderer content={liveEntry.content} allTitlesMap={allTitlesMap} currentBookId={currentBook.id} onLinkClick={handleLinkClick} fontFamily={currentFont} /> : <RichEditor key={currentEntry.id} content={liveEntry.content} onSave={html => saveContent(html)} fontFamily={currentFont} onImageClick={handleImageClick} onResetFormats={() => setActiveFormats({ bold: false, italic: false, underline: false, strike: false, size: 'medium' })} />}</div></div><div className="word-count">{countSingleEntryWords(liveEntry.content).toLocaleString()} 字</div></div>)}{viewMode === 'merged' && currentEntry && (<div className="merged-view">{effectiveReadOnly ? (<div ref={exportRef}><div className="content-header merged-header"><h1>{currentEntry.title}</h1><p className="merged-hint">📖 合并视图</p></div><div className="merged-content-read" onTouchStart={handleContentLongPressStart} onTouchEnd={handleContentLongPressEnd} onTouchMove={handleContentLongPressEnd}>{liveChildContent.map((it, i, arr) => (<div key={it.id} className="merged-section"><div className="section-title">• {it.title}</div><ContentRenderer content={it.content} allTitlesMap={allTitlesMap} currentBookId={currentBook.id} onLinkClick={handleLinkClick} fontFamily={currentFont} />{i < arr.length - 1 && <div className="section-divider" />}</div>))}</div></div>) : (<><div className="content-header merged-header"><h1>{currentEntry.title}</h1><p className="merged-hint">📖 合并视图</p></div><div className="merged-content-edit">{mergedContents.map((it, i) => (<div key={it.id} className="merged-edit-section"><div className="merged-edit-header">• <input type="text" className="merged-title-input" defaultValue={it.title} onBlur={ev => handleMergedChange(i, 'title', ev.target.value)} key={it.id + '-title'} /></div><div className="merged-editor-wrap" contentEditable dangerouslySetInnerHTML={{ __html: it.content }} onBlur={ev => handleMergedChange(i, 'content', ev.target.innerHTML)} onPaste={ev => { ev.preventDefault(); const text = ev.clipboardData.getData('text/plain'); document.execCommand('insertText', false, text); }} style={{ fontFamily: currentFont }} /></div>))}<button className="add-merged-entry-btn" onClick={handleAddMerged}>+ 添加词条</button></div></>)}<div className="word-count">{liveChildContent.reduce((sum, it) => sum + countSingleEntryWords(it.content), 0).toLocaleString()} 字</div></div>)}{viewMode === 'character' && currentEntry && !isReorderMode && (<div className="character-view"><div className="character-header"><h1>{currentEntry.title}</h1><p className="character-hint">👤 人设模式 · {currentEntry.children?.length || 0} 位角色</p></div><div className="character-grid">{(currentEntry.children || []).map((char, idx) => (<CharacterCard key={char.id} entry={char} style={characterCardStyle} onClick={handleCharacterClick} onLongPress={!isVisitingInBook ? handleCharacterLongPress : undefined} index={idx} />))}{!isVisitingInBook && <AddCharacterCard style={characterCardStyle} onClick={() => { setEditingCharacter(null); setShowCharacterModal(true); }} />}</div>{currentEntry.children?.length === 0 && <div className="empty-state"><span>👤</span><p>还没有人设</p><p>点击「+」添加角色</p></div>}</div>)}{viewMode === 'timeline' && liveEntry && (<div className="timeline-mode-view"><div className="timeline-header"><h1>{liveEntry.title}</h1><p className="timeline-hint">📅 时间轴模式</p></div><TimelineView entry={liveEntry} onAddEvent={(yearId) => { setEditingEvent(null); setShowAddEventModal(true); }} onEditEvent={(event) => { setEditingEvent(event); setShowAddEventModal(true); }} onDeleteEvent={handleDeleteTimelineEvent} onAddYear={(eraId) => { setEditingYear(null); setShowAddYearModal(true); }} onEditYear={(year) => { setEditingYear(year); setShowAddYearModal(true); }} onDeleteYear={handleDeleteYear} onAddEra={() => { setEditingEra(null); setShowAddEraModal(true); }} onEditEra={(era) => { setEditingEra(era); setShowAddEraModal(true); }} onDeleteEra={handleDeleteEra} expandedYears={expandedYears} onToggleYear={handleToggleYear} allTitlesMap={allTitlesMap} onLinkClick={handleLinkClick} currentSubTimeline={currentSubTimeline} onExitSubTimeline={() => setCurrentSubTimeline(null)} isReordering={isTimelineReordering} onReorderEvent={handleReorderEvent} /></div>)}{viewMode === 'novel' && liveEntry && (
