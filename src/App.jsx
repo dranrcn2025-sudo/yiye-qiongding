@@ -5210,7 +5210,9 @@ export default function App() {
   
   // 添加人设
   const handleAddCharacter = (charData) => {
-    if (!currentEntry?.characterMode) return;
+    // 使用liveEntry确保获取最新数据
+    const entry = currentEntry ? findEntryById(currentBook?.entries || [], currentEntry.id) || currentEntry : null;
+    if (!entry?.characterMode) return;
     
     const newChar = {
       id: generateId(),
@@ -5227,8 +5229,8 @@ export default function App() {
       ...prev,
       books: prev.books.map(b => b.id === currentBook.id ? {
         ...b,
-        entries: updateEntryInTree(b.entries, currentEntry.id, {
-          children: [...(currentEntry.children || []), newChar]
+        entries: updateEntryInTree(b.entries, entry.id, {
+          children: [...(entry.children || []), newChar]
         })
       } : b)
     }));
@@ -5887,9 +5889,8 @@ export default function App() {
       el.style.padding = '24px 20px';
       el.style.boxShadow = '0 4px 20px rgba(45,48,71,.1)';
       
-      // 限制最大高度，防止内存溢出
-      const maxHeight = 10000;
-      const actualHeight = Math.min(el.offsetHeight + 32, maxHeight);
+      // 获取完整高度，不做截断
+      const fullHeight = el.offsetHeight + 32;
       
       const canvas = await window.html2canvas(el, {
         backgroundColor: '#f5f0e8',
@@ -5899,8 +5900,8 @@ export default function App() {
         x: -16,
         y: -16,
         width: el.offsetWidth + 32,
-        height: actualHeight,
-        windowHeight: actualHeight + 100
+        height: fullHeight,
+        windowHeight: fullHeight + 100
       });
       
       // 移除临时样式
@@ -5977,8 +5978,8 @@ export default function App() {
       el.style.padding = '24px 20px';
       el.style.boxShadow = '0 4px 20px rgba(45,48,71,.1)';
       
-      const maxHeight = 10000;
-      const actualHeight = Math.min(el.offsetHeight + 32, maxHeight);
+      // 获取完整高度，不做截断
+      const fullHeight = el.offsetHeight + 32;
       
       const canvas = await window.html2canvas(el, {
         backgroundColor: '#f5f0e8',
@@ -5988,8 +5989,8 @@ export default function App() {
         x: -16,
         y: -16,
         width: el.offsetWidth + 32,
-        height: actualHeight,
-        windowHeight: actualHeight + 100
+        height: fullHeight,
+        windowHeight: fullHeight + 100
       });
       
       // 移除临时样式
