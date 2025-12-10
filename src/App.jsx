@@ -2423,20 +2423,48 @@ const RocketModal = ({ isOpen, onClose, onFly, showToast, onLaunchStart }) => {
 };
 const ContextMenu = ({ isOpen, position, onClose, options }) => {
   const [expandedSubmenu, setExpandedSubmenu] = useState(null);
+  const menuRef = useRef(null);
   
   useEffect(() => {
     if (!isOpen) setExpandedSubmenu(null);
   }, [isOpen]);
   
   if (!isOpen) return null;
-  const menuH = options.length * 50 + 20;
+  
+  // 计算展开submenu后的总高度
+  const baseMenuH = options.length * 50 + 20;
+  const submenuH = expandedSubmenu !== null && options[expandedSubmenu]?.submenu 
+    ? options[expandedSubmenu].submenu.length * 44 
+    : 0;
+  const totalH = baseMenuH + submenuH;
+  
   const spaceBelow = window.innerHeight - position.y;
-  const top = spaceBelow < menuH ? Math.max(10, position.y - menuH) : position.y;
+  const spaceAbove = position.y;
+  
+  // 优先向下展开，空间不够则向上
+  let top;
+  if (spaceBelow >= totalH) {
+    top = position.y;
+  } else if (spaceAbove >= totalH) {
+    top = position.y - totalH;
+  } else {
+    // 两边都不够，尽量显示完整
+    top = Math.max(10, Math.min(position.y, window.innerHeight - totalH - 10));
+  }
   
   return (
     <>
       <div className="context-overlay" onClick={onClose} />
-      <div className="context-menu" style={{ top, left: Math.min(position.x, window.innerWidth - 180) }}>
+      <div 
+        ref={menuRef}
+        className="context-menu" 
+        style={{ 
+          top, 
+          left: Math.min(position.x, window.innerWidth - 180),
+          maxHeight: window.innerHeight - 20,
+          overflowY: 'auto'
+        }}
+      >
         {options.map((o, i) => (
           o.submenu ? (
             <div key={i} className="context-item-wrapper">
@@ -4697,7 +4725,12 @@ export default function App() {
         setCurrentEntry(te); 
         if (te.isFolder && te.linkable) { 
           setViewMode('merged'); 
-          setTimeout(() => initMerged(te), 0); 
+          setTimeout(() => initMerged(te), 0);
+          // 滚动到顶部
+          setTimeout(() => {
+            const contentArea = document.querySelector('.content-area');
+            if (contentArea) contentArea.scrollTop = 0;
+          }, 100);
         } else if (te.isFolder) setViewMode('list'); 
         else setViewMode('single'); 
       } 
@@ -4872,7 +4905,21 @@ export default function App() {
     ed.forceSave?.(); 
   };
   const handleImageUpload = async (e) => { const f = e.target.files[0]; if (f) { const c = await compressImage(f, 600); const ed = document.querySelector('.rich-editor'); if (ed) { ed.focus(); document.execCommand('insertHTML', false, `<p style="text-align:center"><img src="${c}" style="max-width:100%;border-radius:8px" /></p>`); ed.forceSave?.(); } } e.target.value = ''; };
-  const handleEntrySwipe = (e, dx) => { if (dx < -80 && (e.isFolder || e.children?.length > 0)) { setSlideAnim('slide-in'); setNavigationStack(p => [...p, currentEntry].filter(Boolean)); setCurrentEntry(e); setViewMode('merged'); setTimeout(() => initMerged(e), 50); setTimeout(() => setSlideAnim(''), 250); } };
+  const handleEntrySwipe = (e, dx) => { 
+    if (dx < -80 && (e.isFolder || e.children?.length > 0)) { 
+      setSlideAnim('slide-in'); 
+      setNavigationStack(p => [...p, currentEntry].filter(Boolean)); 
+      setCurrentEntry(e); 
+      setViewMode('merged'); 
+      setTimeout(() => initMerged(e), 50); 
+      setTimeout(() => setSlideAnim(''), 250);
+      // 滚动到顶部
+      setTimeout(() => {
+        const contentArea = document.querySelector('.content-area');
+        if (contentArea) contentArea.scrollTop = 0;
+      }, 100);
+    } 
+  };
 
   // 点击图片，弹出删除确认
   const handleImageClick = (imgElement) => {
@@ -5260,54 +5307,108 @@ export default function App() {
   const handleAddRelation = (relation) => {
     if (!currentEntry?.characterMode) return;
     
-    const currentRelations = currentEntry.characterRelations || [];
-    
-    setData(prev => ({
-      ...prev,
-      books: prev.books.map(b => b.id === currentBook.id ? {
-        ...b,
-        entries: updateEntryInTree(b.entries, currentEntry.id, {
-          characterRelations: [...currentRelations, relation]
-        })
-      } : b)
-    }));
+    setData(prev => {
+      // 从prev中获取最新的entry
+      const book = prev.books.find(b => b.id === currentBook?.id);
+      if (!book) return prev;
+      const entry = findEntryById(book.entries, currentEntry.id);
+      if (!entry) return prev;
+      
+      const currentRelations = entry.characterRelations || [];
+      return {
+        ...prev,
+        books: prev.books.map(b => b.id === book.id ? {
+          ...b,
+          entries: updateEntryInTree(b.entries, entry.id, {
+            characterRelations: [...currentRelations, relation]
+          })
+        } : b)
+      };
+    });
   };
   
   // 删除关系
   const handleDeleteRelation = (relationId) => {
     if (!currentEntry?.characterMode) return;
     
-    setData(prev => ({
-      ...prev,
-      books: prev.books.map(b => b.id === currentBook.id ? {
-        ...b,
-        entries: updateEntryInTree(b.entries, currentEntry.id, {
-          characterRelations: (currentEntry.characterRelations || []).filter(r => r.id !== relationId)
-        })
-      } : b)
-    }));
+    setData(prev => {
+      const book = prev.books.find(b => b.id === currentBook?.id);
+      if (!book) return prev;
+      const entry = findEntryById(book.entries, currentEntry.id);
+      if (!entry) return prev;
+      
+      return {
+        ...prev,
+        books: prev.books.map(b => b.id === book.id ? {
+          ...b,
+          entries: updateEntryInTree(b.entries, entry.id, {
+            characterRelations: (entry.characterRelations || []).filter(r => r.id !== relationId)
+          })
+        } : b)
+      };
+    });
   };
   
   // 更新关系（包括故事备忘）
   const handleUpdateRelation = (updatedRelation) => {
     if (!currentEntry?.characterMode) return;
     
-    setData(prev => ({
-      ...prev,
-      books: prev.books.map(b => b.id === currentBook.id ? {
-        ...b,
-        entries: updateEntryInTree(b.entries, currentEntry.id, {
-          characterRelations: (currentEntry.characterRelations || []).map(r => 
-            r.id === updatedRelation.id ? updatedRelation : r
-          )
-        })
-      } : b)
-    }));
+    setData(prev => {
+      const book = prev.books.find(b => b.id === currentBook?.id);
+      if (!book) return prev;
+      const entry = findEntryById(book.entries, currentEntry.id);
+      if (!entry) return prev;
+      
+      return {
+        ...prev,
+        books: prev.books.map(b => b.id === book.id ? {
+          ...b,
+          entries: updateEntryInTree(b.entries, entry.id, {
+            characterRelations: (entry.characterRelations || []).map(r => 
+              r.id === updatedRelation.id ? updatedRelation : r
+            )
+          })
+        } : b)
+      };
+    });
   };
   
   // 人设卡片点击
   const handleCharacterClick = (char) => {
     setShowCharacterDetail(char);
+  };
+  
+  // 保存人设详情内容（从CharacterDetailPage调用）
+  const handleSaveCharacterContent = (updatedEntry) => {
+    if (!updatedEntry?.id) return;
+    
+    // 使用prev确保获取最新状态
+    setData(prev => {
+      // 找到包含这个entry的book
+      const targetBook = prev.books.find(b => {
+        const findInTree = (entries) => {
+          for (const e of entries) {
+            if (e.id === updatedEntry.id) return true;
+            if (e.children && findInTree(e.children)) return true;
+          }
+          return false;
+        };
+        return findInTree(b.entries);
+      });
+      
+      if (!targetBook) return prev;
+      
+      return {
+        ...prev,
+        books: prev.books.map(b => b.id === targetBook.id ? {
+          ...b,
+          entries: updateEntryInTree(b.entries, updatedEntry.id, { content: updatedEntry.content })
+        } : b)
+      };
+    });
+    
+    // 更新显示状态
+    setShowCharacterDetail(prev => prev ? { ...prev, content: updatedEntry.content } : null);
   };
   
   // 人设卡片长按
@@ -5972,32 +6073,57 @@ export default function App() {
         await new Promise(r => setTimeout(r, 100));
       }
       
+      // 保存原始样式
+      const originalStyle = el.getAttribute('style') || '';
+      
       // 临时添加导出样式
-      el.style.background = '#fff';
+      el.style.background = '#f5f0e8';
       el.style.borderRadius = '16px';
       el.style.padding = '24px 20px';
       el.style.boxShadow = '0 4px 20px rgba(45,48,71,.1)';
       
-      // 获取完整高度，不做截断
+      // 修复头像图片的样式，确保导出时不变形
+      const avatarImgs = el.querySelectorAll('.profile-avatar img');
+      const originalAvatarStyles = [];
+      avatarImgs.forEach((img, i) => {
+        originalAvatarStyles[i] = img.getAttribute('style') || '';
+        // 移除可能导致变形的样式
+        img.style.objectFit = 'cover';
+        img.style.width = '100%';
+        img.style.height = '100%';
+      });
+      
+      // 获取完整尺寸
+      const fullWidth = el.offsetWidth + 32;
       const fullHeight = el.offsetHeight + 32;
       
       const canvas = await window.html2canvas(el, {
         backgroundColor: '#f5f0e8',
         scale: 2,
         useCORS: true,
+        allowTaint: true,
         logging: false,
         x: -16,
         y: -16,
-        width: el.offsetWidth + 32,
+        width: fullWidth,
         height: fullHeight,
-        windowHeight: fullHeight + 100
+        windowWidth: fullWidth + 100,
+        windowHeight: fullHeight + 100,
+        onclone: (clonedDoc) => {
+          // 在克隆的文档中修复样式
+          const clonedAvatars = clonedDoc.querySelectorAll('.profile-avatar img');
+          clonedAvatars.forEach(img => {
+            img.style.objectFit = 'cover';
+            img.style.borderRadius = '50%';
+          });
+        }
       });
       
-      // 移除临时样式
-      el.style.background = '';
-      el.style.borderRadius = '';
-      el.style.padding = '';
-      el.style.boxShadow = '';
+      // 恢复原始样式
+      el.setAttribute('style', originalStyle);
+      avatarImgs.forEach((img, i) => {
+        img.setAttribute('style', originalAvatarStyles[i]);
+      });
       
       const fileName = `${title || '导出'}_${Date.now()}.png`;
       
@@ -6024,15 +6150,18 @@ export default function App() {
           throw new Error('Capacitor modules not loaded');
         }
       } else {
+        // Web端下载
         const link = document.createElement('a');
         link.download = fileName;
         link.href = canvas.toDataURL('image/png');
+        document.body.appendChild(link);
         link.click();
-        showToast('图片已保存');
+        document.body.removeChild(link);
+        showToast('图片已下载');
       }
     } catch (err) {
       console.error('导出失败:', err);
-      showToast('导出失败，内容过长或请稍后重试');
+      showToast('导出失败，请稍后重试');
     }
   };
 
@@ -6305,7 +6434,7 @@ export default function App() {
   onSave={handleSaveStoryEdit}
   editingItem={storyEditItem}
   type={storyEditType}
-/><CharacterEditModal isOpen={showCharacterModal} onClose={() => { setShowCharacterModal(false); setEditingCharacter(null); }} onSave={editingCharacter ? handleUpdateCharacter : handleAddCharacter} editingEntry={editingCharacter} /><RelationNetworkPage isOpen={showRelationNetwork} onClose={() => setShowRelationNetwork(false)} entries={currentEntry?.children || []} relations={currentEntry?.characterRelations || []} onAddRelation={handleAddRelation} onDeleteRelation={handleDeleteRelation} onUpdateRelation={handleUpdateRelation} bookTitle={currentEntry?.title || ''} cardStyle={characterCardStyle} allTitlesMap={allTitlesMap} onLinkClick={handleLinkClick} /><AddEraModal isOpen={showAddEraModal} onClose={() => { setShowAddEraModal(false); setEditingEra(null); }} onSave={editingEra ? handleUpdateEra : handleAddEra} editingEra={editingEra} /><AddYearModal isOpen={showAddYearModal} onClose={() => { setShowAddYearModal(false); setEditingYear(null); }} onSave={editingYear ? handleUpdateYear : handleAddYear} editingYear={editingYear} eras={currentEntry?.timelineConfig?.eras || []} /><AddEventModal isOpen={showAddEventModal} onClose={() => { setShowAddEventModal(false); setEditingEvent(null); }} onSave={editingEvent ? handleUpdateTimelineEvent : handleAddTimelineEvent} editingEvent={editingEvent} eras={currentEntry?.timelineConfig?.eras || []} years={currentEntry?.timelineConfig?.years || []} allTitlesMap={allTitlesMap} /><AddSubTimelineModal isOpen={showAddSubTimelineModal} onClose={() => setShowAddSubTimelineModal(false)} onSave={handleAddSubTimeline} eras={currentEntry?.timelineConfig?.eras || []} characters={[]} /><SubTimelineListPage isOpen={showSubTimelines} onClose={() => setShowSubTimelines(false)} subTimelines={currentEntry?.timelineConfig?.subTimelines || []} eras={currentEntry?.timelineConfig?.eras || []} onSelect={(st) => { setCurrentSubTimeline(st); setShowSubTimelines(false); }} onAdd={() => { setShowSubTimelines(false); setShowAddSubTimelineModal(true); }} onDelete={handleDeleteSubTimeline} />{showCharacterDetail && (<CharacterDetailPage entry={showCharacterDetail} onClose={() => setShowCharacterDetail(null)} onSave={(updatedEntry) => { setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, updatedEntry.id, { content: updatedEntry.content }) } : b) })); setShowCharacterDetail({ ...showCharacterDetail, content: updatedEntry.content }); }} isReadOnly={!!visitingBookshelf} cardStyle={characterCardStyle} allTitlesMap={allTitlesMap} onLinkClick={(kw, bookId, entryId) => { setShowCharacterDetail(null); handleLinkClick(kw, bookId, entryId); }} bookName={currentBook?.title} onExportImage={exportElementAsImage} />)}{toast.show && <div className="app-toast">{toast.message}</div>}<style>{styles}</style></div>);
+/><CharacterEditModal isOpen={showCharacterModal} onClose={() => { setShowCharacterModal(false); setEditingCharacter(null); }} onSave={editingCharacter ? handleUpdateCharacter : handleAddCharacter} editingEntry={editingCharacter} /><RelationNetworkPage isOpen={showRelationNetwork} onClose={() => setShowRelationNetwork(false)} entries={currentEntry?.children || []} relations={currentEntry?.characterRelations || []} onAddRelation={handleAddRelation} onDeleteRelation={handleDeleteRelation} onUpdateRelation={handleUpdateRelation} bookTitle={currentEntry?.title || ''} cardStyle={characterCardStyle} allTitlesMap={allTitlesMap} onLinkClick={handleLinkClick} /><AddEraModal isOpen={showAddEraModal} onClose={() => { setShowAddEraModal(false); setEditingEra(null); }} onSave={editingEra ? handleUpdateEra : handleAddEra} editingEra={editingEra} /><AddYearModal isOpen={showAddYearModal} onClose={() => { setShowAddYearModal(false); setEditingYear(null); }} onSave={editingYear ? handleUpdateYear : handleAddYear} editingYear={editingYear} eras={currentEntry?.timelineConfig?.eras || []} /><AddEventModal isOpen={showAddEventModal} onClose={() => { setShowAddEventModal(false); setEditingEvent(null); }} onSave={editingEvent ? handleUpdateTimelineEvent : handleAddTimelineEvent} editingEvent={editingEvent} eras={currentEntry?.timelineConfig?.eras || []} years={currentEntry?.timelineConfig?.years || []} allTitlesMap={allTitlesMap} /><AddSubTimelineModal isOpen={showAddSubTimelineModal} onClose={() => setShowAddSubTimelineModal(false)} onSave={handleAddSubTimeline} eras={currentEntry?.timelineConfig?.eras || []} characters={[]} /><SubTimelineListPage isOpen={showSubTimelines} onClose={() => setShowSubTimelines(false)} subTimelines={currentEntry?.timelineConfig?.subTimelines || []} eras={currentEntry?.timelineConfig?.eras || []} onSelect={(st) => { setCurrentSubTimeline(st); setShowSubTimelines(false); }} onAdd={() => { setShowSubTimelines(false); setShowAddSubTimelineModal(true); }} onDelete={handleDeleteSubTimeline} />{showCharacterDetail && (<CharacterDetailPage entry={showCharacterDetail} onClose={() => setShowCharacterDetail(null)} onSave={handleSaveCharacterContent} isReadOnly={!!visitingBookshelf} cardStyle={characterCardStyle} allTitlesMap={allTitlesMap} onLinkClick={(kw, bookId, entryId) => { setShowCharacterDetail(null); handleLinkClick(kw, bookId, entryId); }} bookName={currentBook?.title} onExportImage={exportElementAsImage} />)}{toast.show && <div className="app-toast">{toast.message}</div>}<style>{styles}</style></div>);
 }
 
 const styles = `
