@@ -2106,6 +2106,71 @@ const SidebarItem = ({ entry, depth = 0, onSelect, currentId, expandedIds, onTog
 
 const ConfirmModal = ({ isOpen, title, message, onConfirm, onCancel }) => isOpen ? (<div className="modal-overlay" onClick={onCancel}><div className="modal-content confirm-modal" onClick={e => e.stopPropagation()}><h3>{title}</h3><p>{message}</p><div className="modal-actions"><button className="btn-cancel" onClick={onCancel}>取消</button><button className="btn-danger" onClick={onConfirm}>确认删除</button></div></div></div>) : null;
 
+// 特殊模式选择弹窗
+const SpecialModeModal = ({ isOpen, onClose, entry, onSelectMode }) => {
+  if (!isOpen || !entry) return null;
+  
+  const currentMode = entry.novelMode ? 'novel' : entry.characterMode ? 'character' : entry.timelineMode ? 'timeline' : null;
+  
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content special-mode-modal" onClick={e => e.stopPropagation()}>
+        <h3>选择模式</h3>
+        <p className="modal-hint">为「{entry.title}」选择特殊模式</p>
+        
+        <div className="special-mode-options">
+          <div 
+            className={`special-mode-option ${currentMode === 'novel' ? 'active' : ''}`}
+            onClick={() => { onSelectMode('novel'); onClose(); }}
+          >
+            <span className="mode-icon">📖</span>
+            <div className="mode-info">
+              <h4>正文模式</h4>
+              <p>适合连载小说，按章节阅读</p>
+            </div>
+            {currentMode === 'novel' && <span className="mode-check">✓</span>}
+          </div>
+          
+          <div 
+            className={`special-mode-option ${currentMode === 'character' ? 'active' : ''}`}
+            onClick={() => { onSelectMode('character'); onClose(); }}
+          >
+            <span className="mode-icon">👤</span>
+            <div className="mode-info">
+              <h4>人设模式</h4>
+              <p>管理角色档案和关系网络</p>
+            </div>
+            {currentMode === 'character' && <span className="mode-check">✓</span>}
+          </div>
+          
+          <div 
+            className={`special-mode-option ${currentMode === 'timeline' ? 'active' : ''}`}
+            onClick={() => { onSelectMode('timeline'); onClose(); }}
+          >
+            <span className="mode-icon">📅</span>
+            <div className="mode-info">
+              <h4>时间轴模式</h4>
+              <p>记录事件时间线</p>
+            </div>
+            {currentMode === 'timeline' && <span className="mode-check">✓</span>}
+          </div>
+        </div>
+        
+        {currentMode && (
+          <button 
+            className="btn-cancel close-mode-btn" 
+            onClick={() => { onSelectMode(null); onClose(); }}
+          >
+            关闭特殊模式
+          </button>
+        )}
+        
+        <button className="btn-cancel" onClick={onClose} style={{ marginTop: 12 }}>取消</button>
+      </div>
+    </div>
+  );
+};
+
 // 登录注册弹窗
 const AuthModal = ({ isOpen, onClose, mode, setMode, showToast }) => {
   const [email, setEmail] = useState('');
@@ -3795,6 +3860,9 @@ export default function App() {
   const [showCharacterDetail, setShowCharacterDetail] = useState(null);
   const [showRelationNetwork, setShowRelationNetwork] = useState(false);
   const [showCharacterAddMenu, setShowCharacterAddMenu] = useState(false);
+  // 特殊模式选择弹窗
+  const [showSpecialModeModal, setShowSpecialModeModal] = useState(false);
+  const [specialModeTarget, setSpecialModeTarget] = useState(null);
   // 时间轴模式状态
   const [showTimelineSettings, setShowTimelineSettings] = useState(false);
   const [showAddEventModal, setShowAddEventModal] = useState(false);
@@ -4131,7 +4199,7 @@ export default function App() {
     }
   }, [user]);
 
-  // 加载云端数据
+  // 加载云端数据 - 智能比较本地和云端
   const loadCloudData = async () => {
     if (!user) return;
     setSyncStatus('syncing');
@@ -4146,16 +4214,78 @@ export default function App() {
         throw error;
       }
       
+      // 获取本地数据
+      const localData = loadFromStorage();
+      
+      // 计算数据完整度的辅助函数
+      const calculateDataScore = (d) => {
+        if (!d || !d.books) return { books: 0, entries: 0, words: 0, score: 0 };
+        
+        let totalEntries = 0;
+        let totalWords = 0;
+        
+        const countRecursive = (entries) => {
+          if (!entries) return;
+          for (const e of entries) {
+            totalEntries++;
+            if (e.content) {
+              totalWords += e.content.replace(/<[^>]+>/g, '').length;
+            }
+            if (e.children) countRecursive(e.children);
+          }
+        };
+        
+        for (const book of d.books) {
+          countRecursive(book.entries);
+        }
+        
+        // 综合评分：书籍数*1000 + 词条数*10 + 字数
+        const score = d.books.length * 1000 + totalEntries * 10 + totalWords;
+        return { books: d.books.length, entries: totalEntries, words: totalWords, score };
+      };
+      
+      const localScore = calculateDataScore(localData);
+      const cloudScore = calculateDataScore(cloudData?.data);
+      
+      console.log('数据比较 - 本地:', localScore, '云端:', cloudScore);
+      
       if (cloudData?.data) {
-        // 直接使用云端数据，不比较时间戳
-        setData(cloudData.data);
-        saveToStorage(cloudData.data);
-        localStorage.setItem('lastUpdated', new Date(cloudData.updated_at).getTime().toString());
-        setLastSyncTime(new Date(cloudData.updated_at));
+        // 如果本地数据明显更丰富（评分高出20%以上），保留本地
+        if (localScore.score > cloudScore.score * 1.2 && localScore.words > 1000) {
+          console.log('本地数据更丰富，保留本地并上传到云端');
+          // 保留本地数据，上传到云端
+          await saveToCloud(localData);
+          setLastSyncTime(new Date());
+          showToast('已同步本地数据到云端');
+        } else if (cloudScore.score > localScore.score * 1.2 && cloudScore.words > 1000) {
+          // 云端数据明显更丰富，使用云端
+          console.log('云端数据更丰富，使用云端数据');
+          setData(cloudData.data);
+          saveToStorage(cloudData.data);
+          localStorage.setItem('lastUpdated', new Date(cloudData.updated_at).getTime().toString());
+          setLastSyncTime(new Date(cloudData.updated_at));
+        } else {
+          // 数据差不多或都较少，使用更新时间较新的
+          const localUpdated = parseInt(localStorage.getItem('lastUpdated') || '0');
+          const cloudUpdated = new Date(cloudData.updated_at).getTime();
+          
+          if (cloudUpdated > localUpdated) {
+            console.log('云端数据较新，使用云端');
+            setData(cloudData.data);
+            saveToStorage(cloudData.data);
+            localStorage.setItem('lastUpdated', cloudUpdated.toString());
+            setLastSyncTime(new Date(cloudData.updated_at));
+          } else {
+            console.log('本地数据较新，上传到云端');
+            await saveToCloud(localData);
+            setLastSyncTime(new Date());
+          }
+        }
         
         // 恢复用户资料到localStorage和state
-        if (cloudData.data.profile) {
-          const profile = cloudData.data.profile;
+        const profileData = cloudScore.score >= localScore.score ? cloudData.data : localData;
+        if (profileData?.profile) {
+          const profile = profileData.profile;
           if (profile.name) {
             localStorage.setItem('userName', profile.name);
             setUserName(profile.name);
@@ -4170,10 +4300,17 @@ export default function App() {
           }
         }
       } else {
-        // 云端没有数据，使用初始数据并上传
-        setData(initialData);
-        saveToStorage(initialData);
-        await saveToCloud(initialData);
+        // 云端没有数据
+        if (localScore.score > 0) {
+          // 本地有数据，上传到云端
+          console.log('云端无数据，上传本地数据');
+          await saveToCloud(localData);
+        } else {
+          // 本地也没数据，使用初始数据
+          setData(initialData);
+          saveToStorage(initialData);
+          await saveToCloud(initialData);
+        }
       }
       setSyncStatus('success');
     } catch (err) {
@@ -4612,32 +4749,13 @@ export default function App() {
           { icon: '✏️', label: '编辑信息', action: () => { setEditingEntry(item); setShowEntryModal(true); } }, 
           { icon: item.linkable ? '🚫' : '⭐', label: item.linkable ? '关闭跳转' : '开启跳转', action: () => setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, item.id, { linkable: !item.linkable }) } : b) })) }
         ];
-        // 如果是文件夹，添加特殊模式选项（正文/人设/时间轴互斥）
+        // 如果是文件夹，添加特殊模式选项
         if (item.isFolder) {
           const currentMode = item.novelMode ? 'novel' : item.characterMode ? 'character' : item.timelineMode ? 'timeline' : null;
           opts.push({ 
             icon: currentMode ? '✓' : '📋', 
-            label: currentMode === 'novel' ? '正文模式 ✓' : currentMode === 'character' ? '人设模式 ✓' : currentMode === 'timeline' ? '时间轴模式 ✓' : '开启特殊模式',
-            submenu: [
-              { 
-                icon: currentMode === 'novel' ? '✓' : '📖', 
-                label: '正文模式',
-                active: currentMode === 'novel',
-                action: () => setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, item.id, { novelMode: currentMode !== 'novel', characterMode: false, timelineMode: false }) } : b) }))
-              },
-              { 
-                icon: currentMode === 'character' ? '✓' : '👤', 
-                label: '人设模式',
-                active: currentMode === 'character',
-                action: () => setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, item.id, { novelMode: false, characterMode: currentMode !== 'character', timelineMode: false, characterRelations: item.characterRelations || [] }) } : b) }))
-              },
-              { 
-                icon: currentMode === 'timeline' ? '✓' : '📅', 
-                label: '时间轴模式',
-                active: currentMode === 'timeline',
-                action: () => setData(prev => ({ ...prev, books: prev.books.map(b => b.id === currentBook.id ? { ...b, entries: updateEntryInTree(b.entries, item.id, { novelMode: false, characterMode: false, timelineMode: currentMode !== 'timeline', timelineConfig: item.timelineConfig || { eras: [], years: [], events: [], subTimelines: [] } }) } : b) }))
-              }
-            ]
+            label: currentMode === 'novel' ? '正文模式 ✓' : currentMode === 'character' ? '人设模式 ✓' : currentMode === 'timeline' ? '时间轴模式 ✓' : '特殊模式',
+            action: () => { setSpecialModeTarget(item); setShowSpecialModeModal(true); }
           });
         }
         opts.push({ icon: '📁', label: '移动到...', action: () => { setMoveTarget(item); setShowMoveModal(true); } });
@@ -5373,6 +5491,30 @@ export default function App() {
     });
   };
   
+  // 选择特殊模式
+  const handleSelectSpecialMode = (mode) => {
+    if (!specialModeTarget) return;
+    
+    const item = specialModeTarget;
+    const currentMode = item.novelMode ? 'novel' : item.characterMode ? 'character' : item.timelineMode ? 'timeline' : null;
+    
+    setData(prev => ({
+      ...prev,
+      books: prev.books.map(b => b.id === currentBook.id ? {
+        ...b,
+        entries: updateEntryInTree(b.entries, item.id, {
+          novelMode: mode === 'novel' && currentMode !== 'novel',
+          characterMode: mode === 'character' && currentMode !== 'character',
+          timelineMode: mode === 'timeline' && currentMode !== 'timeline',
+          characterRelations: mode === 'character' ? (item.characterRelations || []) : item.characterRelations,
+          timelineConfig: mode === 'timeline' ? (item.timelineConfig || { eras: [], years: [], events: [], subTimelines: [] }) : item.timelineConfig
+        })
+      } : b)
+    }));
+    
+    setSpecialModeTarget(null);
+  };
+  
   // 人设卡片点击
   const handleCharacterClick = (char) => {
     setShowCharacterDetail(char);
@@ -6073,24 +6215,40 @@ export default function App() {
         await new Promise(r => setTimeout(r, 100));
       }
       
+      // 检测是否使用深色主题
+      const isDarkTheme = el.querySelector('.char-profile-card.dark') !== null;
+      const bgColor = isDarkTheme ? '#2D3047' : '#f5f0e8';
+      const cardBgColor = isDarkTheme ? '#2a2d3e' : '#f5f0e8';
+      
       // 保存原始样式
       const originalStyle = el.getAttribute('style') || '';
       
       // 临时添加导出样式
-      el.style.background = '#f5f0e8';
+      el.style.background = cardBgColor;
       el.style.borderRadius = '16px';
       el.style.padding = '24px 20px';
       el.style.boxShadow = '0 4px 20px rgba(45,48,71,.1)';
       
       // 修复头像图片的样式，确保导出时不变形
+      const avatarContainers = el.querySelectorAll('.profile-avatar');
+      const originalContainerStyles = [];
+      avatarContainers.forEach((container, i) => {
+        originalContainerStyles[i] = container.getAttribute('style') || '';
+        // 确保容器尺寸正确
+        container.style.width = '85px';
+        container.style.height = '105px';
+        container.style.overflow = 'hidden';
+      });
+      
       const avatarImgs = el.querySelectorAll('.profile-avatar img');
       const originalAvatarStyles = [];
       avatarImgs.forEach((img, i) => {
         originalAvatarStyles[i] = img.getAttribute('style') || '';
-        // 移除可能导致变形的样式
-        img.style.objectFit = 'cover';
+        // 确保图片正确缩放
         img.style.width = '100%';
         img.style.height = '100%';
+        img.style.objectFit = 'cover';
+        img.style.objectPosition = 'center top';
       });
       
       // 获取完整尺寸
@@ -6098,7 +6256,7 @@ export default function App() {
       const fullHeight = el.offsetHeight + 32;
       
       const canvas = await window.html2canvas(el, {
-        backgroundColor: '#f5f0e8',
+        backgroundColor: bgColor,
         scale: 2,
         useCORS: true,
         allowTaint: true,
@@ -6111,16 +6269,50 @@ export default function App() {
         windowHeight: fullHeight + 100,
         onclone: (clonedDoc) => {
           // 在克隆的文档中修复样式
+          const clonedAvatarContainers = clonedDoc.querySelectorAll('.profile-avatar');
+          clonedAvatarContainers.forEach(container => {
+            container.style.width = '85px';
+            container.style.height = '105px';
+            container.style.overflow = 'hidden';
+            container.style.borderRadius = '10px';
+          });
+          
           const clonedAvatars = clonedDoc.querySelectorAll('.profile-avatar img');
           clonedAvatars.forEach(img => {
+            img.style.width = '100%';
+            img.style.height = '100%';
             img.style.objectFit = 'cover';
-            img.style.borderRadius = '50%';
+            img.style.objectPosition = 'center top';
           });
+          
+          // 修复深色主题下的详细设定区域背景
+          if (isDarkTheme) {
+            const detailBox = clonedDoc.querySelector('.detail-box');
+            if (detailBox) {
+              detailBox.style.background = 'rgba(255,255,255,0.05)';
+              detailBox.style.color = 'rgba(244,228,193,0.85)';
+            }
+            const detailBody = clonedDoc.querySelector('.detail-body');
+            if (detailBody) {
+              detailBody.style.color = 'rgba(244,228,193,0.85)';
+            }
+            const detailTitle = clonedDoc.querySelector('.detail-title');
+            if (detailTitle) {
+              detailTitle.style.color = 'rgba(244,228,193,0.7)';
+            }
+            const charDetailSection = clonedDoc.querySelector('.char-detail-section');
+            if (charDetailSection) {
+              charDetailSection.style.background = 'transparent';
+            }
+          }
         }
       });
       
       // 恢复原始样式
       el.setAttribute('style', originalStyle);
+      avatarContainers.forEach((container, i) => {
+        container.setAttribute('style', originalContainerStyles[i]);
+      });
       avatarImgs.forEach((img, i) => {
         img.setAttribute('style', originalAvatarStyles[i]);
       });
@@ -6314,7 +6506,7 @@ export default function App() {
     collapsedVolumes={novelCollapsedVolumes}
     allEntries={currentBook.entries}
   />
-)}</main>{viewMode === 'list' && !isReorderMode && !isVisitingInBook && (<><button className={`fab ${showAddMenu ? 'active' : ''}`} onClick={() => setShowAddMenu(!showAddMenu)}><span style={{ transform: showAddMenu ? 'rotate(45deg)' : 'none', transition: 'transform 0.2s' }}>+</span></button><AddMenu isOpen={showAddMenu} onClose={() => setShowAddMenu(false)} onAddEntry={() => { setEditingEntry(null); setIsCreatingFolder(false); setShowEntryModal(true); }} onAddFolder={() => { setEditingEntry(null); setIsCreatingFolder(true); setShowEntryModal(true); }} onReorder={() => setIsReorderMode(true)} onToggleGallery={toggleGallery} galleryEnabled={currentBook?.gallery?.enabled} /></>)}{viewMode === 'character' && !isVisitingInBook && (<><button className={`fab ${showCharacterAddMenu ? 'active' : ''}`} onClick={() => setShowCharacterAddMenu(!showCharacterAddMenu)}><span style={{ transform: showCharacterAddMenu ? 'rotate(45deg)' : 'none', transition: 'transform 0.2s' }}>+</span></button><CharacterAddMenu isOpen={showCharacterAddMenu} onClose={() => setShowCharacterAddMenu(false)} onAddCharacter={() => { setEditingCharacter(null); setShowCharacterModal(true); }} onOpenRelationNetwork={() => setShowRelationNetwork(true)} onReorder={() => setIsReorderMode(true)} /></>)}{viewMode === 'timeline' && !isVisitingInBook && (<><button className={`fab ${showTimelineAddMenu ? 'active' : ''}`} onClick={() => setShowTimelineAddMenu(!showTimelineAddMenu)}><span style={{ transform: showTimelineAddMenu ? 'rotate(45deg)' : 'none', transition: 'transform 0.2s' }}>+</span></button><TimelineAddMenu isOpen={showTimelineAddMenu} onClose={() => setShowTimelineAddMenu(false)} onAddEvent={() => { setEditingEvent(null); setShowAddEventModal(true); }} onAddYear={() => { setEditingYear(null); setShowAddYearModal(true); }} onAddEra={() => { setEditingEra(null); setShowAddEraModal(true); }} onManageSubTimelines={() => setShowSubTimelines(true)} onReorder={() => setIsTimelineReordering(!isTimelineReordering)} isReordering={isTimelineReordering} /></>)}{isEditing && <EditorToolbar onIndent={handleIndent} onFormat={() => { saveSelection(); setShowFormatMenu(true); }} onAlign={() => { saveSelection(); setShowAlignMenu(true); }} onFont={() => { saveSelection(); setShowFontMenu(true); }} onImage={handleImageUpload} hasActive={hasActiveFormat} />}<TextFormatMenu isOpen={showFormatMenu} onClose={() => { setShowFormatMenu(false); }} activeFormats={activeFormats} onToggleFormat={handleToggleFormat} /><AlignMenu isOpen={showAlignMenu} onClose={() => { setShowAlignMenu(false); restoreSelection(); }} onAlign={handleAlign} /><FontMenu isOpen={showFontMenu} onClose={() => { setShowFontMenu(false); restoreSelection(); }} onSelectFont={setCurrentFont} currentFont={currentFont} /></div><EntryModal isOpen={showEntryModal} onClose={() => { setShowEntryModal(false); setEditingEntry(null); }} onSave={editingEntry ? handleUpdateEntry : handleAddEntry} editingEntry={editingEntry} parentTitle={currentEntry?.title} isFolder={isCreatingFolder} /><ContextMenu isOpen={contextMenu.isOpen} position={contextMenu.position} onClose={() => setContextMenu({ ...contextMenu, isOpen: false })} options={contextMenu.options} /><MoveModal isOpen={showMoveModal} onClose={() => { setShowMoveModal(false); setMoveTarget(null); }} entry={moveTarget} entries={currentBook?.entries || []} currentParentId={currentEntry?.id || null} onMove={handleMoveEntry} /><ConfirmModal isOpen={confirmModal.isOpen} title={confirmModal.title} message={confirmModal.message} onConfirm={confirmModal.onConfirm} onCancel={() => setConfirmModal({ isOpen: false })} />{showGallery && (<div className="gallery-page" onClick={e => e.stopPropagation()}><div className="gallery-header"><button className="gallery-back" onClick={() => { setShowGallery(false); setGalleryContextMenu({ isOpen: false, image: null, position: { x: 0, y: 0 } }); }}>←</button><h2>{currentBook?.title}</h2><button className="gallery-upload" onClick={() => galleryUploadRef.current?.click()}>+ 添加</button><input ref={galleryUploadRef} type="file" accept="image/*" multiple onChange={uploadGalleryImage} style={{ display: 'none' }} /></div><div className="gallery-grid">{currentBook?.gallery?.images?.map(img => (<div key={img.id} className="gallery-item" onTouchStart={(e) => { e.stopPropagation(); const touch = e.touches[0]; galleryLongPressTimer.current = setTimeout(() => { if (navigator.vibrate) navigator.vibrate(30); setGalleryContextMenu({ isOpen: true, image: img, position: { x: touch.clientX, y: touch.clientY } }); }, 500); }} onTouchEnd={(e) => { e.stopPropagation(); if (galleryLongPressTimer.current) { clearTimeout(galleryLongPressTimer.current); galleryLongPressTimer.current = null; } }} onTouchMove={(e) => { if (galleryLongPressTimer.current) { clearTimeout(galleryLongPressTimer.current); galleryLongPressTimer.current = null; } }} onClick={(e) => { e.stopPropagation(); if (!galleryContextMenu.isOpen) openGalleryPreview(img); }}><img src={img.src} alt="" draggable={false} />{img.featured && <span className="featured-star">★</span>}</div>))}{(!currentBook?.gallery?.images || currentBook.gallery.images.length === 0) && (<div className="gallery-empty"><span>🖼️</span><p>还没有图片</p><p>点击右上角添加</p></div>)}</div>{galleryContextMenu.isOpen && (<><div className="gallery-context-overlay" onClick={(e) => { e.stopPropagation(); setGalleryContextMenu({ isOpen: false, image: null, position: { x: 0, y: 0 } }); }} /><div className="context-menu" style={{ top: galleryContextMenu.position.y, left: Math.min(galleryContextMenu.position.x, window.innerWidth - 180) }}><div className="context-item" onClick={(e) => { e.stopPropagation(); toggleFeatured(galleryContextMenu.image.id); }}><span className="context-icon">{galleryContextMenu.image.featured ? '☆' : '★'}</span>{galleryContextMenu.image.featured ? '取消展示' : '展示'}</div><div className="context-item danger" onClick={(e) => { e.stopPropagation(); deleteGalleryImage(galleryContextMenu.image.id); }}><span className="context-icon">🗑️</span>删除图片</div></div></>)}{galleryConfirmModal.isOpen && (<div className="gallery-confirm-overlay" onClick={(e) => { e.stopPropagation(); setGalleryConfirmModal({ isOpen: false }); }}><div className="modal-content confirm-modal" onClick={e => e.stopPropagation()}><h3>{galleryConfirmModal.title}</h3><p>{galleryConfirmModal.message}</p><div className="modal-actions"><button className="btn-cancel" onClick={() => setGalleryConfirmModal({ isOpen: false })}>取消</button><button className="btn-save" onClick={galleryConfirmModal.onConfirm}>确定</button></div></div></div>)}</div>)}{galleryPreviewImage && (<div className="gallery-viewer" onTouchStart={(e) => {
+)}</main>{viewMode === 'list' && !isReorderMode && !isVisitingInBook && (<><button className={`fab ${showAddMenu ? 'active' : ''}`} onClick={() => setShowAddMenu(!showAddMenu)}><span style={{ transform: showAddMenu ? 'rotate(45deg)' : 'none', transition: 'transform 0.2s' }}>+</span></button><AddMenu isOpen={showAddMenu} onClose={() => setShowAddMenu(false)} onAddEntry={() => { setEditingEntry(null); setIsCreatingFolder(false); setShowEntryModal(true); }} onAddFolder={() => { setEditingEntry(null); setIsCreatingFolder(true); setShowEntryModal(true); }} onReorder={() => setIsReorderMode(true)} onToggleGallery={toggleGallery} galleryEnabled={currentBook?.gallery?.enabled} /></>)}{viewMode === 'character' && !isVisitingInBook && (<><button className={`fab ${showCharacterAddMenu ? 'active' : ''}`} onClick={() => setShowCharacterAddMenu(!showCharacterAddMenu)}><span style={{ transform: showCharacterAddMenu ? 'rotate(45deg)' : 'none', transition: 'transform 0.2s' }}>+</span></button><CharacterAddMenu isOpen={showCharacterAddMenu} onClose={() => setShowCharacterAddMenu(false)} onAddCharacter={() => { setEditingCharacter(null); setShowCharacterModal(true); }} onOpenRelationNetwork={() => setShowRelationNetwork(true)} onReorder={() => setIsReorderMode(true)} /></>)}{viewMode === 'timeline' && !isVisitingInBook && (<><button className={`fab ${showTimelineAddMenu ? 'active' : ''}`} onClick={() => setShowTimelineAddMenu(!showTimelineAddMenu)}><span style={{ transform: showTimelineAddMenu ? 'rotate(45deg)' : 'none', transition: 'transform 0.2s' }}>+</span></button><TimelineAddMenu isOpen={showTimelineAddMenu} onClose={() => setShowTimelineAddMenu(false)} onAddEvent={() => { setEditingEvent(null); setShowAddEventModal(true); }} onAddYear={() => { setEditingYear(null); setShowAddYearModal(true); }} onAddEra={() => { setEditingEra(null); setShowAddEraModal(true); }} onManageSubTimelines={() => setShowSubTimelines(true)} onReorder={() => setIsTimelineReordering(!isTimelineReordering)} isReordering={isTimelineReordering} /></>)}{isEditing && <EditorToolbar onIndent={handleIndent} onFormat={() => { saveSelection(); setShowFormatMenu(true); }} onAlign={() => { saveSelection(); setShowAlignMenu(true); }} onFont={() => { saveSelection(); setShowFontMenu(true); }} onImage={handleImageUpload} hasActive={hasActiveFormat} />}<TextFormatMenu isOpen={showFormatMenu} onClose={() => { setShowFormatMenu(false); }} activeFormats={activeFormats} onToggleFormat={handleToggleFormat} /><AlignMenu isOpen={showAlignMenu} onClose={() => { setShowAlignMenu(false); restoreSelection(); }} onAlign={handleAlign} /><FontMenu isOpen={showFontMenu} onClose={() => { setShowFontMenu(false); restoreSelection(); }} onSelectFont={setCurrentFont} currentFont={currentFont} /></div><EntryModal isOpen={showEntryModal} onClose={() => { setShowEntryModal(false); setEditingEntry(null); }} onSave={editingEntry ? handleUpdateEntry : handleAddEntry} editingEntry={editingEntry} parentTitle={currentEntry?.title} isFolder={isCreatingFolder} /><ContextMenu isOpen={contextMenu.isOpen} position={contextMenu.position} onClose={() => setContextMenu({ ...contextMenu, isOpen: false })} options={contextMenu.options} /><MoveModal isOpen={showMoveModal} onClose={() => { setShowMoveModal(false); setMoveTarget(null); }} entry={moveTarget} entries={currentBook?.entries || []} currentParentId={currentEntry?.id || null} onMove={handleMoveEntry} /><ConfirmModal isOpen={confirmModal.isOpen} title={confirmModal.title} message={confirmModal.message} onConfirm={confirmModal.onConfirm} onCancel={() => setConfirmModal({ isOpen: false })} /><SpecialModeModal isOpen={showSpecialModeModal} onClose={() => { setShowSpecialModeModal(false); setSpecialModeTarget(null); }} entry={specialModeTarget} onSelectMode={handleSelectSpecialMode} />{showGallery && (<div className="gallery-page" onClick={e => e.stopPropagation()}><div className="gallery-header"><button className="gallery-back" onClick={() => { setShowGallery(false); setGalleryContextMenu({ isOpen: false, image: null, position: { x: 0, y: 0 } }); }}>←</button><h2>{currentBook?.title}</h2><button className="gallery-upload" onClick={() => galleryUploadRef.current?.click()}>+ 添加</button><input ref={galleryUploadRef} type="file" accept="image/*" multiple onChange={uploadGalleryImage} style={{ display: 'none' }} /></div><div className="gallery-grid">{currentBook?.gallery?.images?.map(img => (<div key={img.id} className="gallery-item" onTouchStart={(e) => { e.stopPropagation(); const touch = e.touches[0]; galleryLongPressTimer.current = setTimeout(() => { if (navigator.vibrate) navigator.vibrate(30); setGalleryContextMenu({ isOpen: true, image: img, position: { x: touch.clientX, y: touch.clientY } }); }, 500); }} onTouchEnd={(e) => { e.stopPropagation(); if (galleryLongPressTimer.current) { clearTimeout(galleryLongPressTimer.current); galleryLongPressTimer.current = null; } }} onTouchMove={(e) => { if (galleryLongPressTimer.current) { clearTimeout(galleryLongPressTimer.current); galleryLongPressTimer.current = null; } }} onClick={(e) => { e.stopPropagation(); if (!galleryContextMenu.isOpen) openGalleryPreview(img); }}><img src={img.src} alt="" draggable={false} />{img.featured && <span className="featured-star">★</span>}</div>))}{(!currentBook?.gallery?.images || currentBook.gallery.images.length === 0) && (<div className="gallery-empty"><span>🖼️</span><p>还没有图片</p><p>点击右上角添加</p></div>)}</div>{galleryContextMenu.isOpen && (<><div className="gallery-context-overlay" onClick={(e) => { e.stopPropagation(); setGalleryContextMenu({ isOpen: false, image: null, position: { x: 0, y: 0 } }); }} /><div className="context-menu" style={{ top: galleryContextMenu.position.y, left: Math.min(galleryContextMenu.position.x, window.innerWidth - 180) }}><div className="context-item" onClick={(e) => { e.stopPropagation(); toggleFeatured(galleryContextMenu.image.id); }}><span className="context-icon">{galleryContextMenu.image.featured ? '☆' : '★'}</span>{galleryContextMenu.image.featured ? '取消展示' : '展示'}</div><div className="context-item danger" onClick={(e) => { e.stopPropagation(); deleteGalleryImage(galleryContextMenu.image.id); }}><span className="context-icon">🗑️</span>删除图片</div></div></>)}{galleryConfirmModal.isOpen && (<div className="gallery-confirm-overlay" onClick={(e) => { e.stopPropagation(); setGalleryConfirmModal({ isOpen: false }); }}><div className="modal-content confirm-modal" onClick={e => e.stopPropagation()}><h3>{galleryConfirmModal.title}</h3><p>{galleryConfirmModal.message}</p><div className="modal-actions"><button className="btn-cancel" onClick={() => setGalleryConfirmModal({ isOpen: false })}>取消</button><button className="btn-save" onClick={galleryConfirmModal.onConfirm}>确定</button></div></div></div>)}</div>)}{galleryPreviewImage && (<div className="gallery-viewer" onTouchStart={(e) => {
   e.stopPropagation();
   if (e.touches.length === 2) {
     const dx = e.touches[0].clientX - e.touches[1].clientX;
@@ -6638,6 +6830,18 @@ html,body,#root{height:100%;overflow:hidden}
 .emoji-option{font-size:1.8rem;padding:8px;border-radius:8px;cursor:pointer}
 .emoji-option.selected{background:rgba(139,115,85,.2);transform:scale(1.1)}
 .modal-actions{display:flex;gap:12px;margin-top:16px}
+.special-mode-modal{max-width:320px}
+.special-mode-modal .modal-hint{color:#666;font-size:13px;margin-bottom:16px}
+.special-mode-options{display:flex;flex-direction:column;gap:8px}
+.special-mode-option{display:flex;align-items:center;gap:12px;padding:14px;background:#f8f6f3;border-radius:12px;cursor:pointer;transition:all .2s}
+.special-mode-option:active{transform:scale(0.98)}
+.special-mode-option.active{background:#e8e4df;border:2px solid #8B7355}
+.special-mode-option .mode-icon{font-size:24px;width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:10px}
+.special-mode-option .mode-info{flex:1}
+.special-mode-option .mode-info h4{margin:0;font-size:15px;color:#333}
+.special-mode-option .mode-info p{margin:4px 0 0;font-size:12px;color:#888}
+.special-mode-option .mode-check{color:#8B7355;font-size:18px;font-weight:bold}
+.close-mode-btn{width:100%;margin-top:16px;background:#fee;color:#c00;border:none}
 .btn-cancel,.btn-save,.btn-danger{flex:1;padding:12px;border-radius:10px;font-family:'Noto Serif SC',serif;font-size:1rem;cursor:pointer}
 .btn-cancel{background:none;border:2px solid rgba(45,48,71,.2);color:#666}
 .btn-save{background:linear-gradient(135deg,#2D3047,#1a1a2e);border:none;color:#f4e4c1}
@@ -6645,7 +6849,7 @@ html,body,#root{height:100%;overflow:hidden}
 .btn-save:disabled{opacity:.5}
 .book-modal{max-width:400px}
 .context-overlay{position:fixed;inset:0;z-index:1998}
-.context-menu{position:fixed;background:#fff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.2);overflow:hidden;z-index:1999;min-width:160px}
+.context-menu{position:fixed;background:#fff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.2);overflow:hidden;z-index:1999;min-width:160px;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 .context-item{display:flex;align-items:center;gap:12px;padding:14px 18px;cursor:pointer;font-size:.95rem}
 .context-item:active{background:#f5f5f5}
 .context-item.danger{color:#e53935}
