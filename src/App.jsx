@@ -490,28 +490,13 @@ export default function App() {
   const lastUserId = useRef(null);
   const manuallyLoggedOut = useRef(false);
 
-  // 初始化认证状态（CloudBase 匿名登录）
+  // 初始化认证状态（不自动匿名登录，需要用户手动注册）
   useEffect(() => {
-    // 用户手动退出后不自动登录
-    if (manuallyLoggedOut.current) {
-      setAuthLoading(false);
-      return;
+    setAuthLoading(false);
+    const hasSeenGuide = localStorage.getItem('hasSeenLoginGuide');
+    if (!hasSeenGuide) {
+      setTimeout(() => setShowLoginGuide(true), 500);
     }
-    signInAnonymously()
-      .then(({ user: anonUser }) => {
-        setUser(anonUser);
-        lastUserId.current = anonUser?.uid ?? null;
-        setAuthLoading(false);
-        const hasSeenGuide = localStorage.getItem('hasSeenLoginGuide');
-        if (!anonUser && !hasSeenGuide) {
-          setTimeout(() => setShowLoginGuide(true), 500);
-        }
-      })
-      .catch((e) => {
-        console.warn('匿名登录失败，以离线模式运行:', e.message);
-        setUser(null);
-        setAuthLoading(false);
-      });
 
     // 监听登录状态变化
     try {
@@ -526,7 +511,7 @@ export default function App() {
       });
       return () => { try { if (typeof unsubscribe === 'function') unsubscribe(); } catch(e) {} };
     } catch (e) {
-      console.warn('登录监听设置失败，离线模式:', e.message);
+      console.warn('登录监听设置失败:', e.message);
     }
   }, []);
 
@@ -587,7 +572,7 @@ export default function App() {
     try {
       const { data: cloudData, error } = await loadFromCloud(user.uid);
       
-      if (error && error.code !== 'PGRST116') {
+      if (error && error.code !== 'PGRST116' && error.code !== 'NOT_FOUND') {
         throw error;
       }
       
