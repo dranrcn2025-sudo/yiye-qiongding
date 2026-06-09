@@ -14,6 +14,8 @@
     "@capacitor/core": "^7.4.4",
     "@capacitor/filesystem": "^7.1.5",
     "@capacitor/share": "^7.0.3",
+    "@cloudbase/js-sdk": "^3.4.0",
+    "@cloudbase/node-sdk": "^3.18.1",
     "@supabase/supabase-js": "^2.86.0",
     "canvas": "^3.2.0",
     "react": "^18.2.0",
