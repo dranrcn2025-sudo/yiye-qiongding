@@ -3,7 +3,7 @@ import cloudbase from '@cloudbase/js-sdk';
 const ENV_ID = 'yiyeqiongding-d8gzi7d2ddde880bb';
 
 const app = cloudbase.init({ env: ENV_ID });
-const auth = app.auth();
+const auth = app.auth({ persistence: 'local' });
 const db = app.database();
 
 // ============ 登录认证 ============
@@ -38,7 +38,7 @@ const onAuthStateChange = (callback) => {
 
 const signIn = async (email, password) => {
   try {
-    await auth.signInWithPassword({ username: email, password });
+    await auth.signInWithPassword({ email, password });
     const state = await auth.getLoginState();
     return { data: { user: state?.user || null }, error: null };
   } catch (e) {
@@ -48,7 +48,9 @@ const signIn = async (email, password) => {
 
 const signUp = async (email, password) => {
   try {
-    await auth.signUp({ username: email, password, name: email.split('@')[0] });
+    await auth.signUp({ email, password, name: email.split('@')[0] });
+    // 注册成功后自动登录
+    await auth.signInWithPassword({ email, password });
     const state = await auth.getLoginState();
     return { data: { user: state?.user || null }, error: null };
   } catch (e) {
@@ -83,7 +85,16 @@ const ensureCollections = async () => {
   }
 };
 
+const isAuthenticated = async () => {
+  try {
+    const state = await auth.getLoginState();
+    return !!state;
+  } catch { return false; }
+};
+
 const loadFromCloud = async (userId) => {
+  if (!userId) return { data: null, error: { code: 'NO_USER' } };
+  if (!(await isAuthenticated())) return { data: null, error: { code: 'NOT_AUTH' } };
   try {
     const res = await db.collection('user_data').where({ user_id: userId }).get();
     if (res.data && res.data.length > 0) {
@@ -97,6 +108,8 @@ const loadFromCloud = async (userId) => {
 };
 
 const saveToCloudDb = async (userId, cloudData) => {
+  if (!userId) return { error: new Error('无用户ID') };
+  if (!(await isAuthenticated())) return { error: new Error('未登录') };
   try {
     const existing = await db.collection('user_data').where({ user_id: userId }).get();
     if (existing.data && existing.data.length > 0) {
