@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useRef } from 'react';
-import { signIn, signUp } from '../../utils/cloudbase';
+import { sendEmailCode, signInWithCode } from '../../utils/cloudbase';
 
 const SpecialModeModal = ({ isOpen, onClose, entry, onSelectMode }) => {
   if (!isOpen || !entry) return null;
@@ -65,71 +65,93 @@ const SpecialModeModal = ({ isOpen, onClose, entry, onSelectMode }) => {
   );
 };
 
-// 登录注册弹窗
-const AuthModal = ({ isOpen, onClose, mode, setMode, showToast }) => {
+// 登录注册弹窗（邮箱验证码，无密码，登录注册同一流程）
+const AuthModal = ({ isOpen, onClose, showToast }) => {
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [step, setStep] = useState(0); // 0=填邮箱, 1=填验证码
+  const [verifyId, setVerifyId] = useState('');
+  const [isUser, setIsUser] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+
+  useEffect(() => { setStep(0); setCode(''); setError(''); setEmail(''); }, [isOpen]);
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const t = setTimeout(() => setCountdown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [countdown]);
 
   if (!isOpen) return null;
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSendCode = async () => {
+    if (!email || !/\S+@\S+\.\S+/.test(email)) {
+      setError('请输入有效的邮箱地址');
+      return;
+    }
     setLoading(true);
     setError('');
+    const { verification_id, is_user, error: e } = await sendEmailCode(email);
+    setLoading(false);
+    if (e) { setError('发送失败：' + (e.message || '请稍后重试')); return; }
+    setVerifyId(verification_id);
+    setIsUser(!!is_user);
+    setStep(1);
+    setCountdown(60);
+    showToast('验证码已发送，请查收邮件');
+  };
 
-    try {
-      if (mode === 'login') {
-        const { error } = await signIn(email, password);
-        if (error) throw error;
-        onClose();
-      } else {
-        const { error } = await signUp(email, password);
-        if (error) throw error;
-        showToast('注册成功！');
-        onClose();
-      }
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+  const handleVerify = async (e) => {
+    e.preventDefault();
+    if (!code) { setError('请输入验证码'); return; }
+    setLoading(true);
+    setError('');
+    const { error: err } = await signInWithCode(email, code, verifyId, isUser);
+    setLoading(false);
+    if (err) { setError(err.message || '验证失败，请重试'); return; }
+    showToast(isUser ? '登录成功！' : '注册成功！');
+    onClose();
   };
 
   return (
     <div className="auth-modal-overlay" onClick={onClose}>
       <div className="auth-modal" onClick={e => e.stopPropagation()}>
         <button className="modal-close-btn" onClick={onClose}>×</button>
-        <h3>{mode === 'login' ? '登录' : '注册'}</h3>
-        <form onSubmit={handleSubmit}>
-          <input
-            type="email"
-            placeholder="邮箱"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            required
-          />
-          <input
-            type="password"
-            placeholder="密码（至少6位）"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            minLength={6}
-            required
-          />
-          {error && <p className="auth-error">{error}</p>}
-          <button type="submit" className="auth-submit-btn" disabled={loading}>
-            {loading ? '请稍候...' : (mode === 'login' ? '登录' : '注册')}
-          </button>
-        </form>
-        <p className="auth-switch">
-          {mode === 'login' ? (
-            <>还没有账号？<span onClick={() => setMode('register')}>立即注册</span></>
-          ) : (
-            <>已有账号？<span onClick={() => setMode('login')}>立即登录</span></>
-          )}
-        </p>
+        <h3>登录 / 注册</h3>
+        <p className="auth-hint">输入邮箱，收验证码即可登录。没有账号会自动注册。</p>
+
+        {step === 0 ? (
+          <div style={{display:'flex',flexDirection:'column',gap:14}}>
+            <input type="email" placeholder="邮箱地址" value={email} onChange={e => setEmail(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSendCode()} autoFocus />
+            {error && <p className="auth-error">{error}</p>}
+            <button className="auth-submit-btn" onClick={handleSendCode} disabled={loading}>
+              {loading ? '发送中...' : '获取验证码'}
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={handleVerify}>
+            <p className="auth-email-hint">验证码已发送至 {email}</p>
+            <input type="text" placeholder="6位验证码" value={code}
+              onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              maxLength={6} autoFocus inputMode="numeric" />
+            {error && <p className="auth-error">{error}</p>}
+            <button type="submit" className="auth-submit-btn" disabled={loading}>
+              {loading ? '验证中...' : (isUser ? '登录' : '注册并登录')}
+            </button>
+            <button type="button" className="auth-resend-btn" onClick={handleSendCode}
+              disabled={countdown > 0 || loading}
+              style={{width:'100%',marginTop:8,background:'none',border:'none',color:'#8B7355',cursor:countdown>0?'default':'pointer',fontSize:'.85rem'}}>
+              {countdown > 0 ? `${countdown}秒后可重发` : '重新发送验证码'}
+            </button>
+            <button type="button" style={{width:'100%',marginTop:4,background:'none',border:'none',color:'#aaa',cursor:'pointer',fontSize:'.8rem'}}
+              onClick={() => { setStep(0); setCode(''); setError(''); }}>
+              更换邮箱
+            </button>
+          </form>
+        )}
+
       </div>
     </div>
   );

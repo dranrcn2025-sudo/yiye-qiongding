@@ -6,51 +6,44 @@ const app = cloudbase.init({ env: ENV_ID });
 const auth = app.auth({ persistence: 'local' });
 const db = app.database();
 
-// ============ 登录认证 ============
-
-const signInAnonymously = async () => {
-  try {
-    const state = await auth.getLoginState();
-    if (state) return { user: state.user || state, error: null };
-    const result = await auth.signInAnonymously();
-    return { user: result?.user || result, error: null };
-  } catch (e) {
-    console.error('匿名登录失败:', e);
-    return { user: null, error: e };
-  }
-};
-
-const getSession = async () => {
-  try {
-    const state = await auth.getLoginState();
-    return { data: { session: state ? { user: state.user } : null } };
-  } catch {
-    return { data: { session: null } };
-  }
-};
+// ============ 登录认证（邮箱验证码，无密码）============
 
 const onAuthStateChange = (callback) => {
   return auth.onLoginStateChanged((loginState) => {
-    const session = loginState ? { user: loginState.user || loginState } : null;
-    callback('SIGNED_IN', session);
+    if (!loginState) return;
+    const user = loginState.user || loginState;
+    if (user && (user.uid || user._id)) {
+      callback('SIGNED_IN', { user });
+    }
   });
 };
 
-const signIn = async (email, password) => {
+// 第一步：发送验证码（登录和注册通用）
+const sendEmailCode = async (email) => {
   try {
-    await auth.signInWithPassword({ email, password });
-    const state = await auth.getLoginState();
-    return { data: { user: state?.user || null }, error: null };
+    const result = await auth.getVerification({ email });
+    return { verification_id: result?.verification_id, is_user: result?.is_user, error: null };
   } catch (e) {
-    return { data: { user: null }, error: e };
+    return { verification_id: null, is_user: false, error: e };
   }
 };
 
-const signUp = async (email, password) => {
+// 第二步：用验证码登录或注册（自动判断是否已有账号）
+const signInWithCode = async (email, code, verificationId, isUser) => {
   try {
-    await auth.signUp({ email, password, name: email.split('@')[0] });
-    // 注册成功后自动登录
-    await auth.signInWithPassword({ email, password });
+    if (isUser) {
+      // 已有账号，直接登录
+      await auth.signInWithEmail({
+        verificationInfo: { verification_id: verificationId, is_user: true },
+        verificationCode: code,
+        email,
+      });
+    } else {
+      // 新用户，先 verify 拿 token，再 signUp
+      const verifyRes = await auth.verify({ verification_code: code, verification_id: verificationId });
+      if (!verifyRes?.verification_token) throw new Error('验证码错误');
+      await auth.signUp({ email, verification_token: verifyRes.verification_token, name: email.split('@')[0] });
+    }
     const state = await auth.getLoginState();
     return { data: { user: state?.user || null }, error: null };
   } catch (e) {
@@ -67,23 +60,16 @@ const getUser = async () => {
   return state?.user || null;
 };
 
-// ============ 数据库操作 ============
-
-// 确保集合存在（懒创建）
-const ensureCollections = async () => {
+const getSession = async () => {
   try {
-    // 尝试写入一个临时文档来触发集合自动创建
-    // CloudBase 会在第一次写入时自动创建集合，但如果权限不够会失败
-    const checkUserData = await db.collection('user_data').limit(1).get();
-  } catch (e) {
-    console.warn('user_data 集合不可用:', e.message);
-  }
-  try {
-    const checkInviteCodes = await db.collection('invite_codes').limit(1).get();
-  } catch (e) {
-    console.warn('invite_codes 集合不可用:', e.message);
+    const state = await auth.getLoginState();
+    return { data: { session: state ? { user: state.user } : null } };
+  } catch {
+    return { data: { session: null } };
   }
 };
+
+// ============ 数据库操作 ============
 
 const isAuthenticated = async () => {
   try {
@@ -128,6 +114,30 @@ const saveToCloudDb = async (userId, cloudData) => {
   } catch (e) {
     console.error('保存云端数据失败:', e);
     return { error: e };
+  }
+};
+
+// 实时监听云端数据变化
+const watchCloud = (userId, onUpdate) => {
+  try {
+    const watcher = db.collection('user_data')
+      .where({ user_id: userId })
+      .watch({
+        onChange: (snapshot) => {
+          // 取第一条变更文档
+          const changed = snapshot.docChanges?.find(c => c.dataType !== 'init');
+          if (!changed) return;
+          const doc = changed.doc;
+          if (doc?.data && doc?.updated_at) {
+            onUpdate(doc.data, doc.updated_at);
+          }
+        },
+        onError: (err) => console.warn('实时监听出错:', err),
+      });
+    return () => { try { watcher.close(); } catch (e) {} };
+  } catch (e) {
+    console.warn('启动实时监听失败:', e);
+    return () => {};
   }
 };
 
@@ -177,4 +187,18 @@ const findByInviteCode = async (code) => {
   }
 };
 
-export { app, auth, db, ENV_ID, ensureCollections, signInAnonymously, getSession, onAuthStateChange, signIn, signUp, signOut, getUser, loadFromCloud, saveToCloudDb, deleteUserData, upsertInviteCode, findByInviteCode };
+// 兼容旧导出名（App.jsx 仍引用这些名字）
+const signInAnonymously = async () => ({ user: null, error: null });
+const signIn = sendEmailCode;
+const signUp = signInWithCode;
+
+export {
+  app, auth, db, ENV_ID,
+  onAuthStateChange, getSession, getUser,
+  sendEmailCode, signInWithCode,
+  signIn, signUp, signInAnonymously,
+  signOut,
+  loadFromCloud, saveToCloudDb, deleteUserData,
+  watchCloud,
+  upsertInviteCode, findByInviteCode,
+};

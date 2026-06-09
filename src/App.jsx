@@ -1,6 +1,6 @@
 ﻿import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
 import { Filesystem, Directory, Share, loadCapacitor, isCapacitor, copyToClipboard } from './utils/clipboard';
-import { signInAnonymously, getSession, onAuthStateChange, signIn, signUp, signOut, getUser, loadFromCloud, saveToCloudDb, deleteUserData, upsertInviteCode, findByInviteCode, db } from './utils/cloudbase';
+import { signInAnonymously, getSession, onAuthStateChange, signIn, signUp, signOut, getUser, loadFromCloud, saveToCloudDb, deleteUserData, watchCloud, upsertInviteCode, findByInviteCode, db } from './utils/cloudbase';
 import { STORAGE_KEY, LIBRARY_KEY, DB_NAME, DB_VERSION, TRASH_STORE, openDB, saveTrashToIDB, loadTrashFromIDB, cleanupStorage, saveToStorage, loadFromStorage, saveLibrary, loadLibrary } from './utils/storage';
 import { generateId, collectAllLinkableTitles, findEntryPath, findEntryById, getAllChildContent, updateEntryInTree, addEntryToParent, deleteEntryFromTree, reorderEntriesInParent, countWords, countSingleEntryWords, countEntries } from './utils/treeOperations';
 import { compressImage } from './utils/imageUtils';
@@ -489,8 +489,10 @@ export default function App() {
   const [launchAnimating, setLaunchAnimating] = useState(false); // false | 'up' | 'down'
   const lastUserId = useRef(null);
   const manuallyLoggedOut = useRef(false);
+  const cloudWatcherUnsubRef = useRef(null);
+  const lastOwnSaveTimeRef = useRef(0); // 记录本机最后写云端的时间，避免 watch 回声
 
-  // 初始化认证状态（不自动匿名登录，需要用户手动注册）
+  // 初始化认证状态
   useEffect(() => {
     setAuthLoading(false);
     const hasSeenGuide = localStorage.getItem('hasSeenLoginGuide');
@@ -557,11 +559,33 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, [currentBook, currentEntry, navigationStack, characterDetailStack, showRelationNetwork, showGallery, showSettings, showLibrary, showStoryReader, showStoryToc]);
 
-  // 用户登录后加载云端数据
+  // 用户登录后加载云端数据 + 启动实时监听
   useEffect(() => {
+    // 关闭旧的监听
+    if (cloudWatcherUnsubRef.current) {
+      cloudWatcherUnsubRef.current();
+      cloudWatcherUnsubRef.current = null;
+    }
+
     if (user) {
       loadCloudData();
       loadMyInviteCode();
+
+      // 启动实时监听
+      const userId = user?.uid || user?._id || user?.id;
+      if (userId) {
+        cloudWatcherUnsubRef.current = watchCloud(userId, (remoteData, remoteUpdatedAt) => {
+          const remoteTime = new Date(remoteUpdatedAt).getTime();
+          // 如果这条更新是本机自己写的（2秒内），忽略，避免回声
+          if (remoteTime <= lastOwnSaveTimeRef.current + 2000) return;
+          // 远端有更新，应用到本地
+          setData(remoteData);
+          saveToStorage(remoteData);
+          setLastSyncTime(new Date());
+          setSyncStatus('success');
+          showToast('已同步最新数据');
+        });
+      }
     }
   }, [user]);
 
@@ -570,9 +594,9 @@ export default function App() {
     if (!user) return;
     setSyncStatus('syncing');
     try {
-      const { data: cloudData, error } = await loadFromCloud(user.uid);
+      const { data: cloudData, error } = await loadFromCloud(getUserId());
       
-      if (error && error.code !== 'PGRST116' && error.code !== 'NOT_FOUND') {
+      if (error && error.code !== 'PGRST116' && error.code !== 'NOT_FOUND' && error.code !== 'NOT_AUTH' && error.code !== 'NO_USER') {
         throw error;
       }
       
@@ -701,9 +725,13 @@ export default function App() {
     }
   };
 
+  // 获取用户ID（兼容 CloudBase 不同版本的字段名）
+  const getUserId = () => user?.uid || user?._id || user?.id || null;
+
   // 保存到云端
   const saveToCloud = async (dataToSave) => {
-    if (!user || !user.uid) return;
+    const userId = getUserId();
+    if (!userId) return;
     setSyncStatus('syncing');
     try {
       const cloudData = {
@@ -714,8 +742,9 @@ export default function App() {
           shelfTitle: localStorage.getItem('userShelfTitle') || ''
         }
       };
-      const { error } = await saveToCloudDb(user.uid, cloudData);
-      if (error) throw error;
+      const { error } = await saveToCloudDb(userId, cloudData);
+      if (error && error.message !== '未登录' && error.message !== '无用户ID') throw error;
+      lastOwnSaveTimeRef.current = Date.now();
       localStorage.setItem('lastUpdated', Date.now().toString());
       setLastSyncTime(new Date());
       setSyncStatus('success');
@@ -896,7 +925,7 @@ export default function App() {
       
       // 3. 清空云端数据
       if (user) {
-        await deleteUserData(user.uid);
+        await deleteUserData(getUserId());
       }
       
       // 4. 重置所有状态到初始值
@@ -936,7 +965,7 @@ export default function App() {
   // 加载我的邀请码
   const loadMyInviteCode = async () => {
     if (!user) return;
-    const res = await db.collection('invite_codes').where({ user_id: user.uid }).get();
+    const res = await db.collection('invite_codes').where({ user_id: getUserId() }).get();
     if (res.data?.length > 0) {
       setMyInviteCode(res.data[0].code);
     }
@@ -946,7 +975,7 @@ export default function App() {
   const generateInviteCode = async () => {
     if (!user) return;
     const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-    const { error } = await upsertInviteCode(user.uid, code);
+    const { error } = await upsertInviteCode(getUserId(), code);
     if (error) {
       showToast('生成失败，请重试');
       return;
@@ -958,7 +987,7 @@ export default function App() {
   const resetInviteCode = async () => {
     if (!user || !myInviteCode) return;
     const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-    const { error } = await upsertInviteCode(user.uid, newCode);
+    const { error } = await upsertInviteCode(getUserId(), newCode);
     if (error) {
       showToast('重置失败，请重试');
       return;
@@ -986,7 +1015,7 @@ export default function App() {
       return { success: false, error: '坐标无效或不存在' };
     }
 
-    if (user && invitation.user_id === user.uid) {
+    if (user && invitation.user_id === getUserId()) {
       return { success: false, error: '这是你自己的坐标哦' };
     }
 
@@ -1208,6 +1237,10 @@ export default function App() {
   // 关闭设置（带动画）
   const handleLogout = async () => {
     manuallyLoggedOut.current = true;
+    if (cloudWatcherUnsubRef.current) {
+      cloudWatcherUnsubRef.current();
+      cloudWatcherUnsubRef.current = null;
+    }
     await signOut();
     setUser(null);
     closeSettings();
